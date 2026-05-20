@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
 
 class ApiClient {
   private client: AxiosInstance;
@@ -187,6 +187,16 @@ class ApiClient {
 
   async listMaintenanceReminders(vehicleId: number) {
     const response = await this.client.get(`/maintenance/${vehicleId}/reminders`);
+    return response.data;
+  }
+
+  async updateMaintenanceReminder(vehicleId: number, reminderId: number, reminderData: any) {
+    const response = await this.client.put(`/maintenance/${vehicleId}/reminders/${reminderId}`, reminderData);
+    return response.data;
+  }
+
+  async deleteMaintenanceReminder(vehicleId: number, reminderId: number) {
+    const response = await this.client.delete(`/maintenance/${vehicleId}/reminders/${reminderId}`);
     return response.data;
   }
 

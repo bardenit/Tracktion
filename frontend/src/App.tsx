@@ -1,24 +1,26 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
+import TopNav from './components/TopNav';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import VehiclesPage from './pages/VehiclesPage';
 import VehicleDetailPage from './pages/VehicleDetailPage';
 import SettingsPage from './pages/SettingsPage';
 
-interface ProtectedRouteProps {
-  children: React.ReactNode;
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <>{children}</>;
 }
 
-function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
+function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen">
+      <TopNav />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">{children}</main>
+    </div>
+  );
 }
 
 function App() {
@@ -36,7 +38,7 @@ function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <Layout><DashboardPage /></Layout>
             </ProtectedRoute>
           }
         />
@@ -44,7 +46,7 @@ function App() {
           path="/vehicles"
           element={
             <ProtectedRoute>
-              <VehiclesPage />
+              <Layout><VehiclesPage /></Layout>
             </ProtectedRoute>
           }
         />
@@ -52,7 +54,7 @@ function App() {
           path="/vehicles/:vehicleId"
           element={
             <ProtectedRoute>
-              <VehicleDetailPage />
+              <Layout><VehicleDetailPage /></Layout>
             </ProtectedRoute>
           }
         />
@@ -60,7 +62,7 @@ function App() {
           path="/settings"
           element={
             <ProtectedRoute>
-              <SettingsPage />
+              <Layout><SettingsPage /></Layout>
             </ProtectedRoute>
           }
         />
