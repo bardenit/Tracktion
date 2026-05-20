@@ -1,0 +1,365 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+from app.database import get_db
+from app.models import User, Vehicle, MaintenanceEntry, MaintenanceReminder, VehicleCollaborator
+from app.schemas import (
+    MaintenanceEntryCreate,
+    MaintenanceEntryResponse,
+    MaintenanceReminderCreate,
+    MaintenanceReminderUpdate,
+    MaintenanceReminderResponse,
+)
+from app.auth import get_current_user
+
+router = APIRouter()
+
+
+def _check_vehicle_access(vehicle_id: int, user_id: int, db: Session) -> Vehicle:
+    """Helper to check if user has access to vehicle"""
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    
+    is_owner = vehicle.user_id == user_id
+    is_collaborator = (
+        db.query(VehicleCollaborator)
+        .filter(
+            VehicleCollaborator.vehicle_id == vehicle_id,
+            VehicleCollaborator.user_id == user_id,
+        )
+        .first()
+        is not None
+    )
+    
+    if not (is_owner or is_collaborator):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return vehicle
+
+
+@router.post("/{vehicle_id}/entries", response_model=MaintenanceEntryResponse)
+def create_maintenance_entry(
+    vehicle_id: int,
+    entry_data: MaintenanceEntryCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new maintenance entry"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    # Create maintenance entry
+    entry = MaintenanceEntry(
+        vehicle_id=vehicle_id,
+        date=entry_data.date,
+        mileage=entry_data.mileage,
+        type=entry_data.type,
+        cost=entry_data.cost,
+        service_provider=entry_data.service_provider,
+        notes=entry_data.notes,
+    )
+    
+    db.add(entry)
+    
+    # Update vehicle's current mileage
+    vehicle.current_mileage = max(vehicle.current_mileage, entry_data.mileage)
+    
+    # Update maintenance reminder if exists
+    reminder = (
+        db.query(MaintenanceReminder)
+        .filter(
+            MaintenanceReminder.vehicle_id == vehicle_id,
+            MaintenanceReminder.service_type == entry_data.type,
+        )
+        .first()
+    )
+    
+    if reminder:
+        reminder.last_performed_mileage = entry_data.mileage
+        reminder.last_performed_date = entry_data.date
+        reminder.is_overdue = False
+        
+        # Calculate next due
+        if reminder.interval_miles:
+            reminder.next_due_mileage = entry_data.mileage + reminder.interval_miles
+        if reminder.interval_days:
+            from datetime import timedelta
+            reminder.next_due_date = entry_data.date + timedelta(days=reminder.interval_days)
+    
+    db.commit()
+    db.refresh(entry)
+    
+    return entry
+
+
+@router.get("/{vehicle_id}/entries", response_model=List[MaintenanceEntryResponse])
+def list_maintenance_entries(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all maintenance entries for a vehicle"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    entries = (
+        db.query(MaintenanceEntry)
+        .filter(MaintenanceEntry.vehicle_id == vehicle_id)
+        .order_by(MaintenanceEntry.date.desc())
+        .all()
+    )
+    
+    return entries
+
+
+@router.get("/{vehicle_id}/entries/{entry_id}", response_model=MaintenanceEntryResponse)
+def get_maintenance_entry(
+    vehicle_id: int,
+    entry_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get a specific maintenance entry"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    entry = (
+        db.query(MaintenanceEntry)
+        .filter(
+            MaintenanceEntry.id == entry_id,
+            MaintenanceEntry.vehicle_id == vehicle_id,
+        )
+        .first()
+    )
+    
+    if not entry:
+        raise HTTPException(status_code=404, detail="Maintenance entry not found")
+    
+    return entry
+
+
+@router.put("/{vehicle_id}/entries/{entry_id}", response_model=MaintenanceEntryResponse)
+def update_maintenance_entry(
+    vehicle_id: int,
+    entry_id: int,
+    entry_data: MaintenanceEntryCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update a maintenance entry"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    entry = (
+        db.query(MaintenanceEntry)
+        .filter(
+            MaintenanceEntry.id == entry_id,
+            MaintenanceEntry.vehicle_id == vehicle_id,
+        )
+        .first()
+    )
+    
+    if not entry:
+        raise HTTPException(status_code=404, detail="Maintenance entry not found")
+    
+    # Update fields
+    entry.date = entry_data.date
+    entry.mileage = entry_data.mileage
+    entry.type = entry_data.type
+    entry.cost = entry_data.cost
+    entry.service_provider = entry_data.service_provider
+    entry.notes = entry_data.notes
+    
+    db.commit()
+    db.refresh(entry)
+    
+    return entry
+
+
+@router.delete("/{vehicle_id}/entries/{entry_id}")
+def delete_maintenance_entry(
+    vehicle_id: int,
+    entry_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a maintenance entry"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    entry = (
+        db.query(MaintenanceEntry)
+        .filter(
+            MaintenanceEntry.id == entry_id,
+            MaintenanceEntry.vehicle_id == vehicle_id,
+        )
+        .first()
+    )
+    
+    if not entry:
+        raise HTTPException(status_code=404, detail="Maintenance entry not found")
+    
+    db.delete(entry)
+    db.commit()
+    
+    return {"message": "Maintenance entry deleted"}
+
+
+# Maintenance Reminder endpoints
+@router.post("/{vehicle_id}/reminders", response_model=MaintenanceReminderResponse)
+def create_maintenance_reminder(
+    vehicle_id: int,
+    reminder_data: MaintenanceReminderCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a maintenance reminder"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    # Check if reminder already exists for this service
+    existing = (
+        db.query(MaintenanceReminder)
+        .filter(
+            MaintenanceReminder.vehicle_id == vehicle_id,
+            MaintenanceReminder.service_type == reminder_data.service_type,
+        )
+        .first()
+    )
+    
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reminder for {reminder_data.service_type} already exists",
+        )
+    
+    reminder = MaintenanceReminder(
+        vehicle_id=vehicle_id,
+        service_type=reminder_data.service_type,
+        interval_miles=reminder_data.interval_miles,
+        interval_days=reminder_data.interval_days,
+    )
+    
+    db.add(reminder)
+    db.commit()
+    db.refresh(reminder)
+    
+    return reminder
+
+
+@router.get("/{vehicle_id}/reminders", response_model=List[MaintenanceReminderResponse])
+def list_maintenance_reminders(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all maintenance reminders for a vehicle"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    reminders = (
+        db.query(MaintenanceReminder)
+        .filter(MaintenanceReminder.vehicle_id == vehicle_id)
+        .all()
+    )
+    
+    return reminders
+
+
+@router.put("/{vehicle_id}/reminders/{reminder_id}", response_model=MaintenanceReminderResponse)
+def update_maintenance_reminder(
+    vehicle_id: int,
+    reminder_id: int,
+    reminder_data: MaintenanceReminderUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update a maintenance reminder"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    reminder = (
+        db.query(MaintenanceReminder)
+        .filter(
+            MaintenanceReminder.id == reminder_id,
+            MaintenanceReminder.vehicle_id == vehicle_id,
+        )
+        .first()
+    )
+    
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    
+    # Update fields
+    update_data = reminder_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(reminder, field, value)
+    
+    db.commit()
+    db.refresh(reminder)
+    
+    return reminder
+
+
+@router.delete("/{vehicle_id}/reminders/{reminder_id}")
+def delete_maintenance_reminder(
+    vehicle_id: int,
+    reminder_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a maintenance reminder"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    reminder = (
+        db.query(MaintenanceReminder)
+        .filter(
+            MaintenanceReminder.id == reminder_id,
+            MaintenanceReminder.vehicle_id == vehicle_id,
+        )
+        .first()
+    )
+    
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    
+    db.delete(reminder)
+    db.commit()
+    
+    return {"message": "Reminder deleted"}
+
+
+@router.get("/{vehicle_id}/stats")
+def get_maintenance_stats(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get maintenance statistics for a vehicle"""
+    
+    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
+    
+    entries = (
+        db.query(MaintenanceEntry)
+        .filter(MaintenanceEntry.vehicle_id == vehicle_id)
+        .all()
+    )
+    
+    total_cost = sum(e.cost for e in entries)
+    
+    # Group by type
+    by_type = {}
+    for entry in entries:
+        if entry.type not in by_type:
+            by_type[entry.type] = {"count": 0, "total_cost": 0}
+        by_type[entry.type]["count"] += 1
+        by_type[entry.type]["total_cost"] += entry.cost
+    
+    return {
+        "total_cost": total_cost,
+        "entries_count": len(entries),
+        "by_type": by_type,
+    }
