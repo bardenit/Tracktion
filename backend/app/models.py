@@ -145,7 +145,7 @@ class MaintenanceReminder(Base):
     vehicle = relationship("Vehicle", back_populates="maintenance_reminders")
 
 
-class __all__ = [
+__all__ = [
     "User",
     "Vehicle",
     "VehicleCollaborator",
