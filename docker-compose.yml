@@ -1,26 +1,6 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: vehicle-tracker-postgres
-    environment:
-      POSTGRES_USER: ${DATABASE_USER}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
-      POSTGRES_DB: ${DATABASE_NAME}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - vehicle-tracker-network
-    restart: unless-stopped
-
   api:
     build:
       context: ./backend
@@ -47,9 +27,6 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     ports:
       - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes:
       - /data/documents:/data/documents
     networks:
@@ -89,7 +66,6 @@ services:
       - minio
 
 volumes:
-  postgres_data:
   minio_data:
 
 networks:
