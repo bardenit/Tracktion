@@ -6,6 +6,12 @@ class ApiClient {
   private client: AxiosInstance;
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
+  private isRefreshing = false;
+  private onLogoutCallback: (() => void) | null = null;
+
+  setOnLogout(cb: () => void) {
+    this.onLogoutCallback = cb;
+  }
 
   constructor() {
     this.client = axios.create({
@@ -30,18 +36,21 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
-        if (error.response?.status === 401 && this.refreshToken) {
+        if (error.response?.status === 401 && this.refreshToken && !this.isRefreshing) {
+          this.isRefreshing = true;
           try {
             const response = await this.refreshAccessToken();
             this.accessToken = response.access_token;
             this.refreshToken = response.refresh_token;
             this.saveTokens();
+            this.isRefreshing = false;
 
             // Retry original request
             const originalConfig = error.config;
             originalConfig.headers.Authorization = `Bearer ${this.accessToken}`;
             return this.client(originalConfig);
           } catch {
+            this.isRefreshing = false;
             this.logout();
           }
         }
@@ -90,6 +99,7 @@ class ApiClient {
     this.refreshToken = null;
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
+    this.onLogoutCallback?.();
   }
 
   // Vehicle endpoints

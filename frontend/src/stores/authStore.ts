@@ -61,17 +61,20 @@ export const useAuthStore = create<AuthStore>((set) => ({
       set({ user: null, isAuthenticated: false });
       return;
     }
-    // Optimistically trust the stored token — interceptor handles refresh
+    // Optimistically trust stored tokens — the interceptor handles expiry/refresh
+    // and calls logout() (which triggers onLogout → clears store) if unrecoverable
     set({ isAuthenticated: true });
     try {
       const user = await apiClient.getCurrentUser();
       set({ user, isAuthenticated: true });
-    } catch (error: any) {
-      // Only force logout on a definitive auth rejection, not network errors
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        apiClient.logout();
-        set({ user: null, isAuthenticated: false });
-      }
+    } catch {
+      // Interceptor already handled it; don't touch auth state here
     }
   },
 }));
+
+// When the API client's refresh chain fails it calls logout(), which now
+// notifies the store directly so the user is sent to the login page.
+apiClient.setOnLogout(() => {
+  useAuthStore.setState({ user: null, isAuthenticated: false });
+});

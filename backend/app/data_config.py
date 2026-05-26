@@ -10,14 +10,45 @@ def _default_db_url() -> str:
     return f"sqlite:///{DATA_DIR}/tracktion.db"
 
 
+def _storage_from_env() -> dict | None:
+    t = os.environ.get("STORAGE_TYPE", "").lower()
+    if t == "s3":
+        return {
+            "type": "s3",
+            "endpoint": os.environ.get("STORAGE_S3_ENDPOINT", ""),
+            "bucket": os.environ.get("STORAGE_S3_BUCKET", ""),
+            "region": os.environ.get("STORAGE_S3_REGION", "us-east-1"),
+            "access_key": os.environ.get("STORAGE_S3_ACCESS_KEY", ""),
+            "secret_key": os.environ.get("STORAGE_S3_SECRET_KEY", ""),
+        }
+    if t == "webdav":
+        return {
+            "type": "webdav",
+            "url": os.environ.get("STORAGE_WEBDAV_URL", ""),
+            "username": os.environ.get("STORAGE_WEBDAV_USERNAME", ""),
+            "password": os.environ.get("STORAGE_WEBDAV_PASSWORD", ""),
+            "path": os.environ.get("STORAGE_WEBDAV_PATH", "/tracktion"),
+        }
+    return None
+
+
 def get_config() -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG_FILE.exists():
         try:
-            return json.loads(CONFIG_FILE.read_text())
+            config = json.loads(CONFIG_FILE.read_text())
+            if "storage" not in config:
+                env_storage = _storage_from_env()
+                if env_storage:
+                    config["storage"] = env_storage
+            return config
         except Exception:
             pass
-    return {"database": {"type": "sqlite", "url": _default_db_url()}}
+    config: dict = {"database": {"type": "sqlite", "url": _default_db_url()}}
+    env_storage = _storage_from_env()
+    if env_storage:
+        config["storage"] = env_storage
+    return config
 
 
 def save_config(config: dict) -> None:

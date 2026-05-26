@@ -548,7 +548,22 @@ export default function SettingsPage() {
       {activeTab === 'integrations' && (
         <div className="card max-w-lg space-y-5">
           <div>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">Anthropic API</h2>
+            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Anthropic API</h2>
+            {anthropicKeySet ? (
+              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-2 text-sm mb-2">
+                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="text-slate-300">
+                  <span className="text-slate-400">Active: </span>
+                  <span className="text-white font-medium">Anthropic API</span>
+                  {anthropicKeyPreview && <span className="text-slate-500 font-mono text-xs ml-2">{anthropicKeyPreview}</span>}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-2 text-sm mb-2">
+                <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+                <span className="text-slate-400">Not configured — OCR features disabled</span>
+              </div>
+            )}
             <p className="text-slate-500 text-xs">Required for OCR — scanning receipts and fuel pump screens to auto-fill forms.</p>
           </div>
 
