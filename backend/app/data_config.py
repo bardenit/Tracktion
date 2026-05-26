@@ -44,7 +44,14 @@ def get_config() -> dict:
             return config
         except Exception:
             pass
-    config: dict = {"database": {"type": "sqlite", "url": _default_db_url()}}
+    env_db_url = os.environ.get("DATABASE_URL") or _default_db_url()
+    if "postgresql" in env_db_url or "postgres" in env_db_url:
+        db_type = "postgresql"
+    elif "mysql" in env_db_url:
+        db_type = "mysql"
+    else:
+        db_type = "sqlite"
+    config: dict = {"database": {"type": db_type, "url": env_db_url}}
     env_storage = _storage_from_env()
     if env_storage:
         config["storage"] = env_storage
