@@ -3,8 +3,9 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
+import AnalyticsTab from '../components/AnalyticsTab';
 
-type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts';
+type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics';
 
 interface Vehicle {
   id: number;
@@ -189,6 +190,13 @@ export default function VehicleDetailPage() {
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Analytics data (loaded once, used by analytics tab)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsFuel, setAnalyticsFuel] = useState<FuelEntry[]>([]);
+  const [analyticsMaint, setAnalyticsMaint] = useState<MaintenanceEntry[]>([]);
+  const [analyticsExpenses, setAnalyticsExpenses] = useState<Expense[]>([]);
+  const [analyticsTrips, setAnalyticsTrips] = useState<TripEntry[]>([]);
+
   // Tab data
   const [fuelEntries, setFuelEntries] = useState<FuelEntry[]>([]);
   const [fuelStats, setFuelStats] = useState<any>(null);
@@ -294,6 +302,22 @@ export default function VehicleDetailPage() {
     if (activeTab === 'documents') loadDocuments().catch(console.error);
     if (activeTab === 'parts') loadParts().catch(console.error);
     if (activeTab === 'trips') loadTrips().catch(console.error);
+    if (activeTab === 'analytics') {
+      setAnalyticsLoading(true);
+      const trailer = vehicle.vehicle_type === 'trailer';
+      const calls = trailer
+        ? [Promise.resolve([]), apiClient.listMaintenanceEntries(id), Promise.resolve([]), apiClient.listTrips(id)]
+        : [apiClient.listFuelEntries(id), apiClient.listMaintenanceEntries(id), apiClient.listExpenses(id), Promise.resolve([])];
+      Promise.all(calls)
+        .then(([fuel, maint, exp, trips]) => {
+          setAnalyticsFuel(fuel as FuelEntry[]);
+          setAnalyticsMaint(maint as MaintenanceEntry[]);
+          setAnalyticsExpenses(exp as Expense[]);
+          setAnalyticsTrips(trips as TripEntry[]);
+        })
+        .catch(console.error)
+        .finally(() => setAnalyticsLoading(false));
+    }
   }, [activeTab, vehicle, loadFuel, loadMaintenance, loadExpenses, loadDocuments, loadParts, loadTrips]);
 
   // ─── Fuel handlers ──────────────────────────────────────────────────────────
@@ -514,6 +538,7 @@ export default function VehicleDetailPage() {
     { id: 'expenses', label: 'Expenses' },
     { id: 'parts', label: 'Parts' },
     { id: 'documents', label: 'Documents' },
+    { id: 'analytics', label: 'Analytics' },
   ];
 
   const effectiveSpecs = { ...(vehicle.nhtsa_data || {}), ...(vehicle.specs_overrides || {}) };
@@ -1468,6 +1493,18 @@ export default function VehicleDetailPage() {
           </div>
         </form>
       </Modal>
+
+      {/* ── ANALYTICS ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'analytics' && (
+        <AnalyticsTab
+          isTrailer={isTrailer}
+          loading={analyticsLoading}
+          fuelEntries={analyticsFuel}
+          maintEntries={analyticsMaint}
+          expenses={analyticsExpenses}
+          tripEntries={analyticsTrips}
+        />
+      )}
     </div>
   );
 }
