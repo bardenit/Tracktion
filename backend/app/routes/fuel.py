@@ -53,9 +53,15 @@ def create_fuel_entry(
         .first()
     )
     
+    if previous_entry and entry_data.mileage <= previous_entry.mileage:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mileage must be greater than your last fill-up at {int(previous_entry.mileage):,} mi",
+        )
+
     mpg = None
     cost_per_mile = None
-    
+
     if previous_entry:
         miles_driven = entry_data.mileage - previous_entry.mileage
         if miles_driven > 0:

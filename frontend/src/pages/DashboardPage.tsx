@@ -4,11 +4,19 @@ import { apiClient } from '../services/api';
 
 interface Vehicle {
   id: number;
+  nickname?: string;
+  vehicle_type: string;
   make: string;
   model: string;
   year: number;
   current_mileage: number;
   fuel_type: string;
+}
+
+interface TripStats {
+  total_miles: number;
+  trip_count: number;
+  last_trip_date: string | null;
 }
 
 interface FuelStats {
@@ -24,9 +32,9 @@ interface MaintenanceStats {
 
 interface ActivityItem {
   date: string;
-  type: 'fuel' | 'maintenance';
+  type: 'fuel' | 'maintenance' | 'trip';
   description: string;
-  amount: number;
+  amount: number | null;
 }
 
 function fmt(dateStr: string) {
@@ -41,6 +49,7 @@ export default function DashboardPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [fuelStats, setFuelStats] = useState<FuelStats | null>(null);
+  const [tripStats, setTripStats] = useState<TripStats | null>(null);
   const [maintenanceStats, setMaintenanceStats] = useState<MaintenanceStats | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,43 +68,84 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!selectedId) return;
+    const vehicle = vehicles.find((v) => v.id === selectedId);
+    if (!vehicle) return;
+
     setStatsLoading(true);
+    const isTrailer = vehicle.vehicle_type === 'trailer';
 
-    Promise.all([
-      apiClient.getFuelStats(selectedId),
-      apiClient.getMaintenanceStats(selectedId),
-      apiClient.listFuelEntries(selectedId),
-      apiClient.listMaintenanceEntries(selectedId),
-    ])
-      .then(([fuel, maint, fuelEntries, maintEntries]) => {
-        setFuelStats(fuel);
-        setMaintenanceStats(maint);
+    if (isTrailer) {
+      Promise.all([
+        apiClient.getTripStats(selectedId),
+        apiClient.getMaintenanceStats(selectedId),
+        apiClient.listTrips(selectedId),
+        apiClient.listMaintenanceEntries(selectedId),
+      ])
+        .then(([trips, maint, tripEntries, maintEntries]) => {
+          setTripStats(trips);
+          setFuelStats(null);
+          setMaintenanceStats(maint);
 
-        const fuelItems: ActivityItem[] = fuelEntries.slice(0, 5).map((e: any) => ({
-          date: e.date,
-          type: 'fuel' as const,
-          description: `Filled up ${Number(e.gallons).toFixed(1)} gal${e.location ? ` @ ${e.location}` : ''}`,
-          amount: e.cost,
-        }));
-        const maintItems: ActivityItem[] = maintEntries.slice(0, 5).map((e: any) => ({
-          date: e.date,
-          type: 'maintenance' as const,
-          description: `${e.type}${e.service_provider ? ` (${e.service_provider})` : ''}`,
-          amount: e.cost,
-        }));
+          const tripItems: ActivityItem[] = tripEntries.slice(0, 5).map((e: any) => ({
+            date: e.date,
+            type: 'trip' as const,
+            description: `${Number(e.miles).toLocaleString()} mi${e.destination ? ` — ${e.destination}` : ''}`,
+            amount: null,
+          }));
+          const maintItems: ActivityItem[] = maintEntries.slice(0, 5).map((e: any) => ({
+            date: e.date,
+            type: 'maintenance' as const,
+            description: `${e.type}${e.service_provider ? ` (${e.service_provider})` : ''}`,
+            amount: e.cost,
+          }));
 
-        setActivity(
-          [...fuelItems, ...maintItems]
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .slice(0, 5)
-        );
-      })
-      .catch(console.error)
-      .finally(() => setStatsLoading(false));
-  }, [selectedId]);
+          setActivity(
+            [...tripItems, ...maintItems]
+              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+              .slice(0, 5)
+          );
+        })
+        .catch(console.error)
+        .finally(() => setStatsLoading(false));
+    } else {
+      Promise.all([
+        apiClient.getFuelStats(selectedId),
+        apiClient.getMaintenanceStats(selectedId),
+        apiClient.listFuelEntries(selectedId),
+        apiClient.listMaintenanceEntries(selectedId),
+      ])
+        .then(([fuel, maint, fuelEntries, maintEntries]) => {
+          setFuelStats(fuel);
+          setTripStats(null);
+          setMaintenanceStats(maint);
+
+          const fuelItems: ActivityItem[] = fuelEntries.slice(0, 5).map((e: any) => ({
+            date: e.date,
+            type: 'fuel' as const,
+            description: `Filled up ${Number(e.gallons).toFixed(1)} gal${e.location ? ` @ ${e.location}` : ''}`,
+            amount: e.cost,
+          }));
+          const maintItems: ActivityItem[] = maintEntries.slice(0, 5).map((e: any) => ({
+            date: e.date,
+            type: 'maintenance' as const,
+            description: `${e.type}${e.service_provider ? ` (${e.service_provider})` : ''}`,
+            amount: e.cost,
+          }));
+
+          setActivity(
+            [...fuelItems, ...maintItems]
+              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+              .slice(0, 5)
+          );
+        })
+        .catch(console.error)
+        .finally(() => setStatsLoading(false));
+    }
+  }, [selectedId, vehicles]);
 
   const selectedVehicle = vehicles.find((v) => v.id === selectedId);
-  const totalCost = (fuelStats?.total_spent ?? 0) + (maintenanceStats?.total_cost ?? 0);
+  const isTrailer = selectedVehicle?.vehicle_type === 'trailer';
+  const totalCost = (isTrailer ? 0 : (fuelStats?.total_spent ?? 0)) + (maintenanceStats?.total_cost ?? 0);
 
   if (loading) {
     return (
@@ -132,7 +182,7 @@ export default function DashboardPage() {
         >
           {vehicles.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.year} {v.make} {v.model}
+              {v.nickname || `${v.year} ${v.make} ${v.model}`}
             </option>
           ))}
         </select>
@@ -150,23 +200,33 @@ export default function DashboardPage() {
           </p>
           <p className="text-slate-500 text-xs mt-1">miles</p>
         </div>
-        <div className="card">
-          <p className="text-slate-400 text-sm mb-1">Avg Fuel Economy</p>
-          <p className="text-2xl font-bold text-white">
-            {statsLoading
-              ? '...'
-              : fuelStats?.average_mpg != null
-              ? fuelStats.average_mpg.toFixed(1)
-              : '—'}
-          </p>
-          <p className="text-slate-500 text-xs mt-1">MPG</p>
-        </div>
+        {isTrailer ? (
+          <div className="card">
+            <p className="text-slate-400 text-sm mb-1">Miles Hauled</p>
+            <p className="text-2xl font-bold text-white">
+              {statsLoading ? '...' : (tripStats?.total_miles ?? 0).toLocaleString()}
+            </p>
+            <p className="text-slate-500 text-xs mt-1">{tripStats?.trip_count ?? 0} trips</p>
+          </div>
+        ) : (
+          <div className="card">
+            <p className="text-slate-400 text-sm mb-1">Avg Fuel Economy</p>
+            <p className="text-2xl font-bold text-white">
+              {statsLoading
+                ? '...'
+                : fuelStats?.average_mpg != null
+                ? fuelStats.average_mpg.toFixed(1)
+                : '—'}
+            </p>
+            <p className="text-slate-500 text-xs mt-1">MPG</p>
+          </div>
+        )}
         <div className="card">
           <p className="text-slate-400 text-sm mb-1">Total Cost</p>
           <p className="text-2xl font-bold text-white">
             {statsLoading ? '...' : `$${totalCost.toFixed(2)}`}
           </p>
-          <p className="text-slate-500 text-xs mt-1">fuel + maintenance</p>
+          <p className="text-slate-500 text-xs mt-1">{isTrailer ? 'maintenance' : 'fuel + maintenance'}</p>
         </div>
       </div>
 
@@ -174,12 +234,20 @@ export default function DashboardPage() {
       <div className="card">
         <p className="text-sm font-medium text-slate-400 mb-3">Quick Actions</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {[
-            { label: 'Log Fuel', tab: 'fuel' },
-            { label: 'Log Service', tab: 'maintenance' },
-            { label: 'Upload Doc', tab: 'documents' },
-            { label: 'View Details', tab: 'summary' },
-          ].map(({ label, tab }) => (
+          {(isTrailer
+            ? [
+                { label: 'Log Trip', tab: 'trips' },
+                { label: 'Log Service', tab: 'maintenance' },
+                { label: 'Upload Doc', tab: 'documents' },
+                { label: 'View Details', tab: 'summary' },
+              ]
+            : [
+                { label: 'Log Fuel', tab: 'fuel' },
+                { label: 'Log Service', tab: 'maintenance' },
+                { label: 'Upload Doc', tab: 'documents' },
+                { label: 'View Details', tab: 'summary' },
+              ]
+          ).map(({ label, tab }) => (
             <button
               key={label}
               onClick={() => navigate(`/vehicles/${selectedId}?tab=${tab}`)}
@@ -206,7 +274,9 @@ export default function DashboardPage() {
           <p className="text-slate-400 text-sm">Loading...</p>
         ) : activity.length === 0 ? (
           <p className="text-slate-400 text-sm">
-            No activity yet. Start by logging a fuel fill-up or service.
+            {isTrailer
+              ? 'No activity yet. Start by logging a trip or service.'
+              : 'No activity yet. Start by logging a fuel fill-up or service.'}
           </p>
         ) : (
           <ul className="divide-y divide-slate-700">
@@ -215,7 +285,9 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-3">
                   <span
                     className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      item.type === 'fuel' ? 'bg-teal-500' : 'bg-amber-500'
+                      item.type === 'fuel' ? 'bg-teal-500' :
+                      item.type === 'trip' ? 'bg-blue-500' :
+                      'bg-amber-500'
                     }`}
                   />
                   <div>
@@ -223,7 +295,9 @@ export default function DashboardPage() {
                     <p className="text-xs text-slate-400">{fmt(item.date)}</p>
                   </div>
                 </div>
-                <span className="text-sm text-slate-300 ml-4">${Number(item.amount).toFixed(2)}</span>
+                {item.amount != null && (
+                  <span className="text-sm text-slate-300 ml-4">${Number(item.amount).toFixed(2)}</span>
+                )}
               </li>
             ))}
           </ul>

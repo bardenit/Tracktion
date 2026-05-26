@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
+import { useToastStore } from '../stores/toastStore';
 
 type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts';
 
@@ -123,6 +124,7 @@ function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Veh
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(vehicle.current_mileage));
   const [saving, setSaving] = useState(false);
+  const addToast = useToastStore((state) => state.addToast);
 
   const save = async () => {
     const miles = Number(value);
@@ -132,6 +134,7 @@ function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Veh
       const updated = await apiClient.updateVehicleMileage(vehicle.id, miles);
       onUpdate(updated);
       setEditing(false);
+      addToast('success', 'Mileage updated');
     } finally {
       setSaving(false);
     }
@@ -232,6 +235,7 @@ export default function VehicleDetailPage() {
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const addToast = useToastStore((state) => state.addToast);
 
   // ─── Data loaders ───────────────────────────────────────────────────────────
 
@@ -328,6 +332,7 @@ export default function VehicleDetailPage() {
       }
       setFuelModal(false);
       loadFuel().catch(console.error);
+      addToast('success', editFuel ? 'Fuel entry updated' : 'Fill-up logged');
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Failed to save');
     } finally {
@@ -339,6 +344,7 @@ export default function VehicleDetailPage() {
     if (!confirm('Delete this fuel entry?')) return;
     await apiClient.deleteFuelEntry(id, entryId).catch(console.error);
     loadFuel().catch(console.error);
+    addToast('success', 'Fuel entry deleted');
   };
 
   // ─── Maintenance handlers ────────────────────────────────────────────────────
@@ -377,6 +383,7 @@ export default function VehicleDetailPage() {
       }
       setMaintModal(false);
       loadMaintenance().catch(console.error);
+      addToast('success', editMaint ? 'Service record updated' : 'Service logged');
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Failed to save');
     } finally {
@@ -388,6 +395,7 @@ export default function VehicleDetailPage() {
     if (!confirm('Delete this service record?')) return;
     await apiClient.deleteMaintenanceEntry(id, entryId).catch(console.error);
     loadMaintenance().catch(console.error);
+    addToast('success', 'Service record deleted');
   };
 
   const saveReminder = async (e: React.FormEvent) => {
@@ -402,6 +410,7 @@ export default function VehicleDetailPage() {
       });
       setReminderModal(false);
       loadMaintenance().catch(console.error);
+      addToast('success', 'Reminder added');
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Failed to save reminder');
     } finally {
@@ -413,6 +422,7 @@ export default function VehicleDetailPage() {
     if (!confirm('Delete this reminder?')) return;
     await apiClient.deleteMaintenanceReminder(id, reminderId).catch(console.error);
     loadMaintenance().catch(console.error);
+    addToast('success', 'Reminder deleted');
   };
 
   // ─── Expense handlers ────────────────────────────────────────────────────────
@@ -431,6 +441,7 @@ export default function VehicleDetailPage() {
       await apiClient.createExpense(id, { ...expenseForm, amount: Number(expenseForm.amount) });
       setExpenseModal(false);
       loadExpenses().catch(console.error);
+      addToast('success', 'Expense added');
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Failed to save');
     } finally {
@@ -442,6 +453,7 @@ export default function VehicleDetailPage() {
     if (!confirm('Delete this expense?')) return;
     await apiClient.deleteExpense(id, expenseId).catch(console.error);
     loadExpenses().catch(console.error);
+    addToast('success', 'Expense deleted');
   };
 
   // ─── Document handlers ───────────────────────────────────────────────────────
@@ -456,6 +468,7 @@ export default function VehicleDetailPage() {
       setDocModal(false);
       setDocFile(null);
       loadDocuments().catch(console.error);
+      addToast('success', 'Document uploaded');
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Upload failed');
     } finally {
@@ -467,6 +480,7 @@ export default function VehicleDetailPage() {
     if (!confirm('Delete this document?')) return;
     await apiClient.deleteDocument(id, docId).catch(console.error);
     loadDocuments().catch(console.error);
+    addToast('success', 'Document deleted');
   };
 
   // ─── Reminder status helper ──────────────────────────────────────────────────
@@ -706,6 +720,7 @@ export default function VehicleDetailPage() {
                           const v = await apiClient.getVehicle(id);
                           setVehicle(v);
                           loadTrips();
+                          addToast('success', 'Trip deleted');
                         }} className="text-red-400 hover:text-red-300 text-xs">Delete</button>
                       </td>
                     </tr>
@@ -731,6 +746,7 @@ export default function VehicleDetailPage() {
                 setVehicle(v);
                 setTripModal(false);
                 loadTrips();
+                addToast('success', editTrip ? 'Trip updated' : 'Trip logged');
               } catch {
                 setFormError('Failed to save trip');
               } finally {
@@ -1329,6 +1345,7 @@ export default function VehicleDetailPage() {
                               if (!confirm('Delete this part?')) return;
                               await apiClient.deletePart(id, p.id);
                               loadParts();
+                              addToast('success', 'Part deleted');
                             }} className="text-red-400 hover:text-red-300 transition-colors text-xs">Delete</button>
                           </div>
                         </div>
@@ -1354,6 +1371,7 @@ export default function VehicleDetailPage() {
                 }
                 setPartModal(false);
                 loadParts();
+                addToast('success', editPart ? 'Part updated' : 'Part added');
               } catch {
                 setFormError('Failed to save part');
               } finally {
@@ -1410,6 +1428,7 @@ export default function VehicleDetailPage() {
             const updated = await apiClient.updateSpecsOverrides(id, overrides);
             setVehicle(updated);
             setSpecsEditModal(false);
+            addToast('success', 'Specs updated');
           } catch {
             setFormError('Failed to save');
           } finally {
