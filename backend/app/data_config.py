@@ -32,16 +32,25 @@ def _storage_from_env() -> dict | None:
     return None
 
 
+def _backfill_from_env(config: dict) -> dict:
+    """Fill any missing sections from environment variables."""
+    if "storage" not in config:
+        env_storage = _storage_from_env()
+        if env_storage:
+            config["storage"] = env_storage
+    if "integrations" not in config:
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if key:
+            config["integrations"] = {"anthropic_api_key": key}
+    return config
+
+
 def get_config() -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG_FILE.exists():
         try:
             config = json.loads(CONFIG_FILE.read_text())
-            if "storage" not in config:
-                env_storage = _storage_from_env()
-                if env_storage:
-                    config["storage"] = env_storage
-            return config
+            return _backfill_from_env(config)
         except Exception:
             pass
     env_db_url = os.environ.get("DATABASE_URL") or _default_db_url()
@@ -52,10 +61,7 @@ def get_config() -> dict:
     else:
         db_type = "sqlite"
     config: dict = {"database": {"type": db_type, "url": env_db_url}}
-    env_storage = _storage_from_env()
-    if env_storage:
-        config["storage"] = env_storage
-    return config
+    return _backfill_from_env(config)
 
 
 def save_config(config: dict) -> None:

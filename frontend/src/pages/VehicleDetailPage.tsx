@@ -268,6 +268,11 @@ export default function VehicleDetailPage() {
   );
   const [customTypesOpen, setCustomTypesOpen] = useState(false);
   const [newTypeInput, setNewTypeInput] = useState('');
+  const [customExpenseCategories, setCustomExpenseCategories] = useState<string[]>(() =>
+    JSON.parse(localStorage.getItem('customExpenseCategories') || '[]')
+  );
+  const [expenseCatsOpen, setExpenseCatsOpen] = useState(false);
+  const [newCatInput, setNewCatInput] = useState('');
   const [maintOther, setMaintOther] = useState('');
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
   const [reminderTrigger, setReminderTrigger] = useState<'interval' | 'target'>('interval');
@@ -500,6 +505,7 @@ export default function VehicleDetailPage() {
   const openExpenseAdd = () => {
     setExpenseForm({ category: 'insurance', amount: 0, date: today(), description: '' });
     setFormError('');
+    setExpenseCatsOpen(false);
     setExpenseModal(true);
   };
 
@@ -644,6 +650,28 @@ export default function VehicleDetailPage() {
     const updated = customServiceTypes.filter((t) => t !== name);
     setCustomServiceTypes(updated);
     localStorage.setItem('customServiceTypes', JSON.stringify(updated));
+  };
+
+  const BASE_EXPENSE_CATEGORIES = EXPENSE_CATEGORIES.filter((c) => c !== 'other');
+  const ALL_EXPENSE_CATEGORIES = [
+    ...BASE_EXPENSE_CATEGORIES,
+    ...customExpenseCategories.filter((c) => !BASE_EXPENSE_CATEGORIES.includes(c)),
+    'other',
+  ];
+
+  const addExpenseCategory = (name: string) => {
+    const trimmed = name.trim().toLowerCase();
+    if (!trimmed || ALL_EXPENSE_CATEGORIES.includes(trimmed)) return;
+    const updated = [...customExpenseCategories, trimmed];
+    setCustomExpenseCategories(updated);
+    localStorage.setItem('customExpenseCategories', JSON.stringify(updated));
+    setNewCatInput('');
+  };
+
+  const removeExpenseCategory = (name: string) => {
+    const updated = customExpenseCategories.filter((c) => c !== name);
+    setCustomExpenseCategories(updated);
+    localStorage.setItem('customExpenseCategories', JSON.stringify(updated));
   };
 
   const tabs: { id: Tab; label: string }[] = [
@@ -1482,21 +1510,46 @@ export default function VehicleDetailPage() {
                   }
                 }} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">Category *</label>
-                  <select className="input-field" value={expenseForm.category}
-                    onChange={(e) => setExpenseForm((p) => ({ ...p, category: e.target.value }))}>
-                    {EXPENSE_CATEGORIES.map((c) => (
-                      <option key={c} value={c} className="capitalize">{c}</option>
-                    ))}
-                  </select>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-slate-300">Category *</label>
+                  <button type="button" onClick={() => setExpenseCatsOpen((o) => !o)}
+                    className="text-xs text-slate-400 hover:text-teal-400 transition-colors">
+                    {expenseCatsOpen ? 'Done' : '✎ Edit list'}
+                  </button>
                 </div>
-                <div>
+                <select className="input-field" value={expenseForm.category}
+                  onChange={(e) => setExpenseForm((p) => ({ ...p, category: e.target.value }))}>
+                  {ALL_EXPENSE_CATEGORIES.map((c) => (
+                    <option key={c} value={c} className="capitalize">{c}</option>
+                  ))}
+                </select>
+                {expenseCatsOpen && (
+                  <div className="mt-2 p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                    {customExpenseCategories.length === 0 && (
+                      <p className="text-slate-500 text-xs">No custom categories yet.</p>
+                    )}
+                    {customExpenseCategories.map((c) => (
+                      <div key={c} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-300 capitalize">{c}</span>
+                        <button type="button" onClick={() => removeExpenseCategory(c)}
+                          className="text-slate-500 hover:text-red-400 text-base leading-none transition-colors">×</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <input className="input-field flex-1 text-sm py-1" placeholder="Add category..."
+                        value={newCatInput} onChange={(e) => setNewCatInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExpenseCategory(newCatInput); } }} />
+                      <button type="button" onClick={() => addExpenseCategory(newCatInput)}
+                        className="btn-secondary text-sm px-3 py-1">Add</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div>
                   <label className="block text-sm text-slate-300 mb-1">Amount ($) *</label>
                   <input type="number" className="input-field" min="0" step="0.01" value={expenseForm.amount}
                     onChange={(e) => setExpenseForm((p) => ({ ...p, amount: Number(e.target.value) }))} required />
-                </div>
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Date *</label>
