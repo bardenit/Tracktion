@@ -28,7 +28,8 @@ export default function TopNav() {
   );
 
   return (
-    <nav className="bg-slate-800 border-b border-slate-700 sticky top-0 z-40">
+    <nav className="bg-slate-800 border-b border-slate-700 sticky top-0 z-40"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <Link to="/" className="text-teal-400 font-bold text-lg tracking-tight">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
+import VehiclePhoto from '../components/VehiclePhoto';
 
 interface Vehicle {
   id: number;
@@ -185,6 +186,12 @@ export default function DashboardPage() {
 
       {/* Vehicle selector */}
       <div className="flex flex-wrap items-center gap-3">
+        {selectedId && (
+          <VehiclePhoto
+            vehicleId={selectedId}
+            className="w-16 h-12 flex-shrink-0"
+          />
+        )}
         <select
           value={selectedId ?? ''}
           onChange={(e) => {

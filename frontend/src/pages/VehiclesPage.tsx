@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
+import VehiclePhoto from '../components/VehiclePhoto';
 
 interface Vehicle {
   id: number;
@@ -186,6 +187,12 @@ export default function VehiclesPage() {
           {vehicles.map((v) => (
             <div key={v.id} className="card">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <VehiclePhoto
+                    vehicleId={v.id}
+                    alt={`${v.year} ${v.make} ${v.model}`}
+                    className="w-20 h-16 flex-shrink-0 hidden sm:block"
+                  />
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-semibold text-white">
@@ -206,6 +213,7 @@ export default function VehiclesPage() {
                     {v.vehicle_type !== 'trailer' && <span className="capitalize">Fuel: {v.fuel_type}</span>}
                     {v.vehicle_type === 'trailer' && v.axle_count && <span>{v.axle_count}-axle</span>}
                   </div>
+                </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   <button
