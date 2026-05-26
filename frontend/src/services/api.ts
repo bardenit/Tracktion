@@ -408,6 +408,25 @@ class ApiClient {
     const response = await this.client.delete(`/documents/${vehicleId}/documents/${documentId}`);
     return response.data;
   }
+
+  async getVehiclePhoto(vehicleId: number): Promise<Blob | null> {
+    try {
+      const response = await this.client.get(`/documents/${vehicleId}/photo`, { responseType: 'blob' });
+      return response.data as Blob;
+    } catch {
+      return null;
+    }
+  }
+
+  async uploadVehiclePhoto(vehicleId: number, file: File): Promise<void> {
+    const form = new FormData();
+    form.append('file', file);
+    await this.client.post(`/documents/${vehicleId}/photo`, form);
+  }
+
+  async deleteVehiclePhoto(vehicleId: number): Promise<void> {
+    await this.client.delete(`/documents/${vehicleId}/photo`);
+  }
 }
 
 export const apiClient = new ApiClient();

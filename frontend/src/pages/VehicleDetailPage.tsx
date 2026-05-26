@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
@@ -218,6 +218,11 @@ export default function VehicleDetailPage() {
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Vehicle photo
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photoBlobRef = useRef<string | null>(null);
+
   // Analytics data (loaded once, used by analytics tab)
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsFuel, setAnalyticsFuel] = useState<FuelEntry[]>([]);
@@ -335,6 +340,16 @@ export default function VehicleDetailPage() {
       .then(setVehicle)
       .catch(() => navigate('/vehicles'))
       .finally(() => setLoading(false));
+    // Load photo alongside vehicle
+    apiClient.getVehiclePhoto(Number(id)).then((blob) => {
+      if (photoBlobRef.current) URL.revokeObjectURL(photoBlobRef.current);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        photoBlobRef.current = url;
+        setPhotoUrl(url);
+      }
+    });
+    return () => { if (photoBlobRef.current) URL.revokeObjectURL(photoBlobRef.current); };
   }, [id, navigate]);
 
   useEffect(() => {
@@ -498,6 +513,37 @@ export default function VehicleDetailPage() {
     await apiClient.deleteMaintenanceReminder(id, reminderId).catch(console.error);
     loadMaintenance().catch(console.error);
     addToast('success', 'Reminder deleted');
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true);
+    try {
+      await apiClient.uploadVehiclePhoto(Number(id), file);
+      const blob = await apiClient.getVehiclePhoto(Number(id));
+      if (photoBlobRef.current) URL.revokeObjectURL(photoBlobRef.current);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        photoBlobRef.current = url;
+        setPhotoUrl(url);
+      }
+      addToast('success', 'Photo saved');
+    } catch {
+      addToast('error', 'Upload failed');
+    } finally {
+      setPhotoUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    if (!confirm('Remove vehicle photo?')) return;
+    await apiClient.deleteVehiclePhoto(Number(id)).catch(console.error);
+    if (photoBlobRef.current) URL.revokeObjectURL(photoBlobRef.current);
+    photoBlobRef.current = null;
+    setPhotoUrl(null);
+    addToast('success', 'Photo removed');
   };
 
   // ─── Expense handlers ────────────────────────────────────────────────────────
@@ -759,6 +805,41 @@ export default function VehicleDetailPage() {
       {/* ── SUMMARY ─────────────────────────────────────────────────────────── */}
       {activeTab === 'summary' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          {/* Vehicle photo */}
+          <div className="sm:col-span-2 card p-0 overflow-hidden">
+            {photoUrl ? (
+              <div className="relative group">
+                <img
+                  src={photoUrl}
+                  alt={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
+                  className="w-full max-h-72 object-cover"
+                />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <label className={`btn-secondary text-xs cursor-pointer px-2 py-1 ${photoUploading ? 'opacity-50' : ''}`}>
+                    {photoUploading ? 'Uploading…' : 'Replace'}
+                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                      onChange={handlePhotoUpload} disabled={photoUploading} />
+                  </label>
+                  <button onClick={handleDeletePhoto}
+                    className="bg-red-900/80 hover:bg-red-800 text-red-200 text-xs px-2 py-1 rounded transition-colors">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <label className={`flex flex-col items-center justify-center h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors m-4 ${
+                photoUploading ? 'border-teal-600 opacity-50' : 'border-slate-600 hover:border-teal-600'
+              }`}>
+                <span className="text-slate-400 text-sm">{photoUploading ? 'Uploading…' : '📷  Add a photo'}</span>
+                <span className="text-slate-500 text-xs mt-1">Click to browse or use your camera</span>
+                <input type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={handlePhotoUpload} disabled={photoUploading} />
+              </label>
+            )}
+          </div>
+
           <div className="card space-y-3">
             <h2 className="font-semibold text-white">Vehicle Info</h2>
             {(

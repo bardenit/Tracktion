@@ -9,6 +9,9 @@ class StorageBackend(ABC):
     def save(self, data: bytes, path: str, content_type: str = 'application/octet-stream') -> str: ...
 
     @abstractmethod
+    def load(self, path: str) -> bytes: ...
+
+    @abstractmethod
     def delete(self, path: str) -> None: ...
 
     @abstractmethod
@@ -25,6 +28,11 @@ class LocalStorage(StorageBackend):
         with open(full, 'wb') as f:
             f.write(data)
         return path
+
+    def load(self, path: str) -> bytes:
+        full = os.path.join(self.base, path)
+        with open(full, 'rb') as f:
+            return f.read()
 
     def delete(self, path: str) -> None:
         full = os.path.join(self.base, path)
@@ -57,6 +65,10 @@ class S3Storage(StorageBackend):
     def save(self, data: bytes, path: str, content_type: str = 'application/octet-stream') -> str:
         self.s3.put_object(Bucket=self.bucket, Key=path, Body=data, ContentType=content_type)
         return path
+
+    def load(self, path: str) -> bytes:
+        response = self.s3.get_object(Bucket=self.bucket, Key=path)
+        return response['Body'].read()
 
     def delete(self, path: str) -> None:
         self.s3.delete_object(Bucket=self.bucket, Key=path)
@@ -94,6 +106,17 @@ class WebDAVStorage(StorageBackend):
         finally:
             os.unlink(tmp_path)
         return path
+
+    def load(self, path: str) -> bytes:
+        remote = f"{self.base}/{path}"
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            self.client.download_sync(remote_path=remote, local_path=tmp_path)
+            with open(tmp_path, 'rb') as f:
+                return f.read()
+        finally:
+            os.unlink(tmp_path)
 
     def delete(self, path: str) -> None:
         remote = f"{self.base}/{path}"
