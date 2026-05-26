@@ -1087,6 +1087,7 @@ export default function VehicleDetailPage() {
                 onClick={() => {
                   setReminderTrigger('interval');
                   setReminderForm({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
+                  setCustomTypesOpen(false);
                   setFormError('');
                   setReminderModal(true);
                 }}
@@ -1297,11 +1298,38 @@ export default function VehicleDetailPage() {
             <form onSubmit={saveReminder} className="space-y-4">
               <FormError msg={formError} />
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Service Type *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-slate-300">Service Type *</label>
+                  <button type="button" onClick={() => setCustomTypesOpen((o) => !o)}
+                    className="text-xs text-slate-400 hover:text-teal-400 transition-colors">
+                    {customTypesOpen ? 'Done' : '✎ Edit list'}
+                  </button>
+                </div>
                 <select className="input-field" value={reminderForm.service_type}
                   onChange={(e) => setReminderForm((p) => ({ ...p, service_type: e.target.value }))}>
                   {SERVICE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
+                {customTypesOpen && (
+                  <div className="mt-2 p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                    {customServiceTypes.length === 0 && (
+                      <p className="text-slate-500 text-xs">No custom types yet.</p>
+                    )}
+                    {customServiceTypes.map((t) => (
+                      <div key={t} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-300">{t}</span>
+                        <button type="button" onClick={() => removeCustomType(t)}
+                          className="text-slate-500 hover:text-red-400 text-base leading-none transition-colors">×</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <input className="input-field flex-1 text-sm py-1" placeholder="Add type..."
+                        value={newTypeInput} onChange={(e) => setNewTypeInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomType(newTypeInput); } }} />
+                      <button type="button" onClick={() => addCustomType(newTypeInput)}
+                        className="btn-secondary text-sm px-3 py-1">Add</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Trigger type toggle */}
