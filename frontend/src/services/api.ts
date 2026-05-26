@@ -2,6 +2,32 @@ import axios, { AxiosInstance } from 'axios';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
 
+function resizeImageForUpload(file: File, maxDim = 1920, quality = 0.85): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => blob
+          ? resolve(new File([blob], 'photo.jpg', { type: 'image/jpeg' }))
+          : reject(new Error('Canvas resize failed')),
+        'image/jpeg',
+        quality,
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); }; // fall back to original
+    img.src = objectUrl;
+  });
+}
+
 class ApiClient {
   private client: AxiosInstance;
   private accessToken: string | null = null;
@@ -419,8 +445,9 @@ class ApiClient {
   }
 
   async uploadVehiclePhoto(vehicleId: number, file: File): Promise<void> {
+    const resized = await resizeImageForUpload(file);
     const form = new FormData();
-    form.append('file', file);
+    form.append('file', resized);
     await this.client.post(`/documents/${vehicleId}/photo`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
