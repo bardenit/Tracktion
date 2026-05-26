@@ -34,5 +34,5 @@ export default function VehiclePhoto({ vehicleId, alt = 'Vehicle photo', classNa
 
   if (!ready) return <div className={`bg-slate-800 animate-pulse rounded-lg ${className}`} />;
   if (!url) return null;
-  return <img src={url} alt={alt} className={`object-cover rounded-lg ${className}`} />;
+  return <img src={url} alt={alt} className={`rounded-lg ${className}`} />;
 }

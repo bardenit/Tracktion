@@ -186,12 +186,6 @@ export default function DashboardPage() {
 
       {/* Vehicle selector */}
       <div className="flex flex-wrap items-center gap-3">
-        {selectedId && (
-          <VehiclePhoto
-            vehicleId={selectedId}
-            className="w-16 h-12 flex-shrink-0"
-          />
-        )}
         <select
           value={selectedId ?? ''}
           onChange={(e) => {
@@ -211,6 +205,11 @@ export default function DashboardPage() {
           + Add Vehicle
         </button>
       </div>
+
+      {/* Vehicle photo */}
+      {selectedId && (
+        <VehiclePhoto vehicleId={selectedId} className="w-full h-auto" />
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
