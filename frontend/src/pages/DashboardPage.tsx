@@ -47,7 +47,10 @@ function fmt(dateStr: string) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() => {
+    const stored = localStorage.getItem('dashboardVehicleId');
+    return stored ? Number(stored) : null;
+  });
   const [fuelStats, setFuelStats] = useState<FuelStats | null>(null);
   const [tripStats, setTripStats] = useState<TripStats | null>(null);
   const [maintenanceStats, setMaintenanceStats] = useState<MaintenanceStats | null>(null);
@@ -60,7 +63,12 @@ export default function DashboardPage() {
       .listVehicles()
       .then((data: Vehicle[]) => {
         setVehicles(data);
-        if (data.length > 0) setSelectedId(data[0].id);
+        if (data.length > 0) {
+          const stored = localStorage.getItem('dashboardVehicleId');
+          const storedId = stored ? Number(stored) : null;
+          const valid = storedId && data.some((v: Vehicle) => v.id === storedId);
+          setSelectedId(valid ? storedId : data[0].id);
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -177,7 +185,11 @@ export default function DashboardPage() {
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={selectedId ?? ''}
-          onChange={(e) => setSelectedId(Number(e.target.value))}
+          onChange={(e) => {
+            const id = Number(e.target.value);
+            setSelectedId(id);
+            localStorage.setItem('dashboardVehicleId', String(id));
+          }}
           className="bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-teal-500"
         >
           {vehicles.map((v) => (
