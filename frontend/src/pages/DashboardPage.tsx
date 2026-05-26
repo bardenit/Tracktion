@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
+import VehicleSilhouette, { DEFAULT_COLOR } from '../components/VehicleSilhouette';
 
 interface Vehicle {
   id: number;
@@ -11,6 +12,8 @@ interface Vehicle {
   year: number;
   current_mileage: number;
   fuel_type: string;
+  nhtsa_data?: Record<string, unknown>;
+  specs_overrides?: Record<string, unknown>;
 }
 
 interface TripStats {
@@ -198,6 +201,17 @@ export default function DashboardPage() {
             </option>
           ))}
         </select>
+        {selectedId && (() => {
+          const v = vehicles.find((v) => v.id === selectedId);
+          return v ? (
+            <VehicleSilhouette
+              bodyClass={v.nhtsa_data?.body_class as string | undefined}
+              vehicleType={v.vehicle_type}
+              color={(v.specs_overrides?.color as string) || DEFAULT_COLOR}
+              className="h-10 w-28 opacity-80"
+            />
+          ) : null;
+        })()}
         <button onClick={() => navigate('/vehicles')} className="btn-secondary text-sm">
           + Add Vehicle
         </button>
