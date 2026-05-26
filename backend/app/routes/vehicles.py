@@ -89,6 +89,19 @@ def list_vehicles(
     return owned + shared
 
 
+@router.get("/vin-lookup", response_model=VINDecodeResponse)
+async def vin_lookup(
+    vin: str,
+    current_user: User = Depends(get_current_user),
+):
+    if len(vin) != 17:
+        raise HTTPException(status_code=400, detail="VIN must be 17 characters")
+    result = await decode_vin(vin)
+    if not result:
+        raise HTTPException(status_code=400, detail="VIN not found or invalid")
+    return result
+
+
 @router.get("/{vehicle_id}", response_model=VehicleResponse)
 def get_vehicle(
     vehicle_id: int,

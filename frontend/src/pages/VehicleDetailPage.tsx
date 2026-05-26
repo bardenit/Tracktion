@@ -3,18 +3,39 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
 
-type Tab = 'summary' | 'fuel' | 'maintenance' | 'expenses' | 'documents';
+type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts';
 
 interface Vehicle {
   id: number;
+  nickname?: string;
+  vehicle_type: string;
   make: string;
   model: string;
   year: number;
   vin?: string;
   current_mileage: number;
   fuel_type: string;
+  axle_count?: number;
   created_at: string;
   nhtsa_data?: Record<string, unknown>;
+  specs_overrides?: Record<string, unknown>;
+}
+
+interface TripEntry {
+  id: number;
+  date: string;
+  miles: number;
+  destination?: string;
+  notes?: string;
+}
+
+interface VehiclePart {
+  id: number;
+  name: string;
+  part_number?: string;
+  brand?: string;
+  category: string;
+  notes?: string;
 }
 
 interface FuelEntry {
@@ -64,10 +85,18 @@ interface Document {
   created_at: string;
 }
 
-const SERVICE_TYPES = [
+const VEHICLE_SERVICE_TYPES = [
   'Oil Change', 'Tire Rotation', 'Brake Service', 'Air Filter',
   'Transmission Service', 'Coolant Flush', 'Spark Plugs', 'Battery',
   'Alignment', 'Wiper Blades', 'Other',
+];
+
+const TRAILER_SERVICE_TYPES = [
+  'Wheel Bearing Service', 'Hub Inspection', 'Axle Seal Replacement',
+  'Brake Adjustment', 'Running Lights Check', 'Tire Rotation/Replacement',
+  'Coupler/Hitch Inspection', 'Safety Chain Inspection',
+  'Floor/Decking Inspection', 'Wiring Harness Inspection',
+  'Suspension Inspection', 'Other',
 ];
 
 const EXPENSE_CATEGORIES = ['insurance', 'registration', 'repair', 'fuel', 'other'];
@@ -87,6 +116,61 @@ function FormError({ msg }: { msg: string }) {
     <p className="text-red-400 text-sm bg-red-900/30 border border-red-800 p-3 rounded">
       {msg}
     </p>
+  );
+}
+
+function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(vehicle.current_mileage));
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const miles = Number(value);
+    if (isNaN(miles) || miles < 0) return;
+    setSaving(true);
+    try {
+      const updated = await apiClient.updateVehicleMileage(vehicle.id, miles);
+      onUpdate(updated);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex justify-between text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+        <span className="text-slate-400">Current Mileage</span>
+        <button
+          onClick={() => { setValue(String(vehicle.current_mileage)); setEditing(true); }}
+          className="text-white font-mono hover:text-teal-400 transition-colors group flex items-center gap-1"
+        >
+          {vehicle.current_mileage.toLocaleString()} mi
+          <span className="text-slate-500 group-hover:text-teal-400 text-xs">✎</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-2">
+      <span className="text-slate-400">Current Mileage</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          className="w-28 px-2 py-0.5 bg-slate-700 border border-teal-500 rounded text-white text-right font-mono text-sm focus:outline-none"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          autoFocus
+          min="0"
+        />
+        <button onClick={save} disabled={saving} className="text-teal-400 hover:text-teal-300 text-xs font-medium">
+          {saving ? '...' : 'Save'}
+        </button>
+        <button onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      </div>
+    </div>
   );
 }
 
@@ -116,16 +200,33 @@ export default function VehicleDetailPage() {
   const [reminderModal, setReminderModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
   const [docModal, setDocModal] = useState(false);
+  const [partModal, setPartModal] = useState(false);
+  const [specsEditModal, setSpecsEditModal] = useState(false);
 
   // Edit targets (null = adding new)
   const [editFuel, setEditFuel] = useState<FuelEntry | null>(null);
   const [editMaint, setEditMaint] = useState<MaintenanceEntry | null>(null);
+  const [editPart, setEditPart] = useState<VehiclePart | null>(null);
+
+  // Parts state
+  const [parts, setParts] = useState<VehiclePart[]>([]);
+
+  // Trip state
+  const [tripEntries, setTripEntries] = useState<TripEntry[]>([]);
+  const [tripStats, setTripStats] = useState<any>(null);
+  const [tripModal, setTripModal] = useState(false);
+  const [editTrip, setEditTrip] = useState<TripEntry | null>(null);
+  const [tripForm, setTripForm] = useState({ date: today(), miles: 0, destination: '', notes: '' });
+
+  // Specs override state
+  const [specsForm, setSpecsForm] = useState<Record<string, string>>({});
 
   // Form state
   const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '' });
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
   const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '' });
   const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '' });
+  const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docType, setDocType] = useState('registration');
 
@@ -160,6 +261,19 @@ export default function VehicleDetailPage() {
     setDocuments(await apiClient.listDocuments(id));
   }, [id]);
 
+  const loadParts = useCallback(async () => {
+    setParts(await apiClient.listParts(id));
+  }, [id]);
+
+  const loadTrips = useCallback(async () => {
+    const [entries, stats] = await Promise.all([
+      apiClient.listTrips(id),
+      apiClient.getTripStats(id),
+    ]);
+    setTripEntries(entries);
+    setTripStats(stats);
+  }, [id]);
+
   useEffect(() => {
     apiClient
       .getVehicle(id)
@@ -174,7 +288,9 @@ export default function VehicleDetailPage() {
     if (activeTab === 'maintenance') loadMaintenance().catch(console.error);
     if (activeTab === 'expenses') loadExpenses().catch(console.error);
     if (activeTab === 'documents') loadDocuments().catch(console.error);
-  }, [activeTab, vehicle, loadFuel, loadMaintenance, loadExpenses, loadDocuments]);
+    if (activeTab === 'parts') loadParts().catch(console.error);
+    if (activeTab === 'trips') loadTrips().catch(console.error);
+  }, [activeTab, vehicle, loadFuel, loadMaintenance, loadExpenses, loadDocuments, loadParts, loadTrips]);
 
   // ─── Fuel handlers ──────────────────────────────────────────────────────────
 
@@ -370,13 +486,23 @@ export default function VehicleDetailPage() {
   if (loading) return <div className="text-slate-400 py-10 text-center">Loading...</div>;
   if (!vehicle) return null;
 
+  const isTrailer = vehicle.vehicle_type === 'trailer';
+
+  const SERVICE_TYPES = isTrailer ? TRAILER_SERVICE_TYPES : VEHICLE_SERVICE_TYPES;
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'summary', label: 'Summary' },
-    { id: 'fuel', label: 'Fuel' },
+    ...(isTrailer
+      ? [{ id: 'trips' as Tab, label: 'Trip Log' }]
+      : [{ id: 'fuel' as Tab, label: 'Fuel' }]
+    ),
     { id: 'maintenance', label: 'Maintenance' },
     { id: 'expenses', label: 'Expenses' },
+    { id: 'parts', label: 'Parts' },
     { id: 'documents', label: 'Documents' },
   ];
+
+  const effectiveSpecs = { ...(vehicle.nhtsa_data || {}), ...(vehicle.specs_overrides || {}) };
 
   return (
     <div className="space-y-6">
@@ -388,9 +514,17 @@ export default function VehicleDetailPage() {
         >
           ← All Vehicles
         </button>
-        <h1 className="text-2xl font-bold text-white">
-          {vehicle.year} {vehicle.make} {vehicle.model}
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-white">
+            {vehicle.nickname || `${vehicle.year} ${vehicle.make} ${vehicle.model}`}
+          </h1>
+          {isTrailer && (
+            <span className="text-xs bg-amber-900/50 text-amber-300 border border-amber-700 px-2 py-0.5 rounded">Trailer</span>
+          )}
+        </div>
+        {vehicle.nickname && (
+          <p className="text-slate-400 text-sm">{vehicle.year} {vehicle.make} {vehicle.model}</p>
+        )}
         {vehicle.vin && (
           <p className="text-slate-400 text-sm mt-1 font-mono">VIN: {vehicle.vin}</p>
         )}
@@ -425,8 +559,8 @@ export default function VehicleDetailPage() {
                 ['Year', vehicle.year],
                 ['Make', vehicle.make],
                 ['Model', vehicle.model],
-                ['Fuel Type', vehicle.fuel_type],
-                ['Current Mileage', `${vehicle.current_mileage.toLocaleString()} mi`],
+                ...(!isTrailer ? [['Fuel Type', vehicle.fuel_type]] : []),
+                ...(isTrailer && vehicle.axle_count ? [['Axles', vehicle.axle_count]] : []),
                 ...(vehicle.vin ? [['VIN', vehicle.vin]] : []),
               ] as [string, string | number][]
             ).map(([label, value]) => (
@@ -435,23 +569,199 @@ export default function VehicleDetailPage() {
                 <span className="text-white font-mono text-right">{value}</span>
               </div>
             ))}
+            <MileageRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
           </div>
 
-          {vehicle.nhtsa_data && Object.keys(vehicle.nhtsa_data).length > 0 && (
-            <div className="card">
-              <h2 className="font-semibold text-white mb-3">NHTSA Data</h2>
-              <div className="space-y-2">
-                {Object.entries(vehicle.nhtsa_data)
-                  .slice(0, 8)
-                  .map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-sm">
-                      <span className="text-slate-400 truncate mr-4">{k}</span>
-                      <span className="text-white text-right">{String(v)}</span>
+          {Object.keys(effectiveSpecs).length > 0 && (
+            <div className="card sm:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-white">Vehicle Specs</h2>
+                <button onClick={() => {
+                  setSpecsForm(Object.fromEntries(Object.entries(effectiveSpecs).map(([k, v]) => [k, String(v)])));
+                  setSpecsEditModal(true);
+                }} className="btn-secondary text-xs py-1 px-3">Edit Specs</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                {(effectiveSpecs.engine_model || effectiveSpecs.engine_cylinders || effectiveSpecs.engine_displacement_l || effectiveSpecs.fuel_type) && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Engine</h3>
+                    <div className="space-y-1.5">
+                      {[
+                        effectiveSpecs.engine_model && ['Model', effectiveSpecs.engine_model],
+                        effectiveSpecs.engine_displacement_l && ['Displacement', `${effectiveSpecs.engine_displacement_l}L`],
+                        effectiveSpecs.engine_cylinders && ['Cylinders', effectiveSpecs.engine_cylinders],
+                        effectiveSpecs.engine_hp && ['Horsepower', `${effectiveSpecs.engine_hp} hp`],
+                        effectiveSpecs.turbo && ['Turbocharged', effectiveSpecs.turbo],
+                        effectiveSpecs.fuel_type && ['Fuel', effectiveSpecs.fuel_type],
+                      ].filter(Boolean).map(([label, value]) => (
+                        <div key={label as string} className="flex justify-between text-sm">
+                          <span className="text-slate-400">{label as string}</span>
+                          <span className={`text-right ml-4 text-sm ${vehicle.specs_overrides?.[label as string] !== undefined ? 'text-teal-300' : 'text-white'}`}>{String(value)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                )}
+                {(effectiveSpecs.drive_type || effectiveSpecs.transmission_type || effectiveSpecs.transmission_speeds) && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Drivetrain</h3>
+                    <div className="space-y-1.5">
+                      {[
+                        effectiveSpecs.drive_type && ['Drive Type', effectiveSpecs.drive_type],
+                        effectiveSpecs.transmission_type && ['Transmission', effectiveSpecs.transmission_type],
+                        effectiveSpecs.transmission_speeds && ['Speeds', effectiveSpecs.transmission_speeds],
+                      ].filter(Boolean).map(([label, value]) => (
+                        <div key={label as string} className="flex justify-between text-sm">
+                          <span className="text-slate-400">{label as string}</span>
+                          <span className={`text-right ml-4 text-sm ${vehicle.specs_overrides?.[label as string] !== undefined ? 'text-teal-300' : 'text-white'}`}>{String(value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(effectiveSpecs.body_class || effectiveSpecs.cab_type || effectiveSpecs.trim || effectiveSpecs.series || effectiveSpecs.gvwr) && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Body & Trim</h3>
+                    <div className="space-y-1.5">
+                      {[
+                        effectiveSpecs.body_class && ['Body', effectiveSpecs.body_class],
+                        effectiveSpecs.cab_type && ['Cab', effectiveSpecs.cab_type],
+                        effectiveSpecs.doors && ['Doors', effectiveSpecs.doors],
+                        effectiveSpecs.series && ['Series', effectiveSpecs.series],
+                        effectiveSpecs.trim && ['Trim', effectiveSpecs.trim],
+                        effectiveSpecs.gvwr && ['GVWR', effectiveSpecs.gvwr],
+                        effectiveSpecs.plant_city && effectiveSpecs.plant_country && ['Built In', `${effectiveSpecs.plant_city}, ${effectiveSpecs.plant_country}`],
+                      ].filter(Boolean).map(([label, value]) => (
+                        <div key={label as string} className="flex justify-between text-sm">
+                          <span className="text-slate-400">{label as string}</span>
+                          <span className={`text-right ml-4 text-sm ${vehicle.specs_overrides?.[label as string] !== undefined ? 'text-teal-300' : 'text-white'}`}>{String(value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── TRIP LOG ────────────────────────────────────────────────────────── */}
+      {activeTab === 'trips' && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">Trip Log</h2>
+            <button onClick={() => {
+              setEditTrip(null);
+              setTripForm({ date: today(), miles: 0, destination: '', notes: '' });
+              setFormError('');
+              setTripModal(true);
+            }} className="btn-primary text-sm">+ Log Trip</button>
+          </div>
+
+          {tripStats && (
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: 'Total Miles', value: tripStats.total_miles.toLocaleString() + ' mi' },
+                { label: 'Total Trips', value: tripStats.trip_count },
+                { label: 'Last Trip', value: tripStats.last_trip_date ? fmtDate(tripStats.last_trip_date) : '—' },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+                  <p className="text-slate-400 text-xs">{label}</p>
+                  <p className="text-white font-semibold mt-0.5">{value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tripEntries.length === 0 ? (
+            <div className="card text-center py-10 text-slate-400">No trips logged yet.</div>
+          ) : (
+            <div className="card overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700">
+                    {['Date', 'Miles', 'Destination', 'Notes', ''].map((h) => (
+                      <th key={h} className="px-4 py-2 text-left text-slate-400 font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tripEntries.map((t) => (
+                    <tr key={t.id} className="border-b border-slate-700/50 hover:bg-slate-700/20">
+                      <td className="px-4 py-3 text-slate-300">{fmtDate(t.date)}</td>
+                      <td className="px-4 py-3 text-white font-medium">{t.miles.toLocaleString()} mi</td>
+                      <td className="px-4 py-3 text-slate-300">{t.destination || '—'}</td>
+                      <td className="px-4 py-3 text-slate-400">{t.notes || '—'}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => {
+                          setEditTrip(t);
+                          setTripForm({ date: t.date, miles: t.miles, destination: t.destination || '', notes: t.notes || '' });
+                          setFormError('');
+                          setTripModal(true);
+                        }} className="text-slate-400 hover:text-white text-xs mr-3">Edit</button>
+                        <button onClick={async () => {
+                          if (!confirm('Delete this trip? This will subtract the miles from the odometer.')) return;
+                          await apiClient.deleteTrip(id, t.id);
+                          const v = await apiClient.getVehicle(id);
+                          setVehicle(v);
+                          loadTrips();
+                        }} className="text-red-400 hover:text-red-300 text-xs">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <Modal isOpen={tripModal} onClose={() => setTripModal(false)} title={editTrip ? 'Edit Trip' : 'Log Trip'}>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setSaving(true);
+              setFormError('');
+              try {
+                const payload = { ...tripForm, miles: Number(tripForm.miles), destination: tripForm.destination || undefined, notes: tripForm.notes || undefined };
+                if (editTrip) {
+                  await apiClient.updateTrip(id, editTrip.id, payload);
+                } else {
+                  await apiClient.createTrip(id, payload);
+                }
+                const v = await apiClient.getVehicle(id);
+                setVehicle(v);
+                setTripModal(false);
+                loadTrips();
+              } catch {
+                setFormError('Failed to save trip');
+              } finally {
+                setSaving(false);
+              }
+            }} className="space-y-4">
+              <FormError msg={formError} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Date *</label>
+                  <input type="date" className="input-field" value={tripForm.date} onChange={(e) => setTripForm((p) => ({ ...p, date: e.target.value }))} required />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Miles *</label>
+                  <input type="number" className="input-field" min="0" step="0.1" value={tripForm.miles} onChange={(e) => setTripForm((p) => ({ ...p, miles: Number(e.target.value) }))} required />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Destination</label>
+                <input className="input-field" placeholder="e.g. Camping trip, job site" value={tripForm.destination} onChange={(e) => setTripForm((p) => ({ ...p, destination: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Notes</label>
+                <input className="input-field" placeholder="Optional notes" value={tripForm.notes} onChange={(e) => setTripForm((p) => ({ ...p, notes: e.target.value }))} />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : editTrip ? 'Update Trip' : 'Log Trip'}</button>
+                <button type="button" onClick={() => setTripModal(false)} className="btn-secondary flex-1">Cancel</button>
+              </div>
+            </form>
+          </Modal>
         </div>
       )}
 
@@ -973,6 +1283,172 @@ export default function VehicleDetailPage() {
           </Modal>
         </div>
       )}
+
+      {/* ── PARTS ───────────────────────────────────────────────────────────────── */}
+      {activeTab === 'parts' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">Parts & Part Numbers</h2>
+            <button onClick={() => {
+              setEditPart(null);
+              setPartForm({ name: '', part_number: '', brand: '', category: 'filters', notes: '' });
+              setFormError('');
+              setPartModal(true);
+            }} className="btn-primary text-sm">+ Add Part</button>
+          </div>
+
+          {parts.length === 0 ? (
+            <div className="card text-center py-10 text-slate-400">No parts added yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {(['filters', 'engine', 'drivetrain', 'brakes', 'suspension', 'electrical', 'trailer', 'other'] as const).map((cat) => {
+                const catParts = parts.filter((p) => p.category === cat);
+                if (catParts.length === 0) return null;
+                return (
+                  <div key={cat} className="card">
+                    <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-3 capitalize">{cat}</h3>
+                    <div className="space-y-2">
+                      {catParts.map((p) => (
+                        <div key={p.id} className="flex items-start justify-between gap-4 text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+                          <div className="min-w-0">
+                            <p className="text-white font-medium">{p.name}</p>
+                            <div className="flex flex-wrap gap-3 mt-0.5 text-slate-400">
+                              {p.brand && <span>{p.brand}</span>}
+                              {p.part_number && <span className="font-mono text-teal-300">#{p.part_number}</span>}
+                              {p.notes && <span className="italic">{p.notes}</span>}
+                            </div>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button onClick={() => {
+                              setEditPart(p);
+                              setPartForm({ name: p.name, part_number: p.part_number || '', brand: p.brand || '', category: p.category, notes: p.notes || '' });
+                              setFormError('');
+                              setPartModal(true);
+                            }} className="text-slate-400 hover:text-white transition-colors text-xs">Edit</button>
+                            <button onClick={async () => {
+                              if (!confirm('Delete this part?')) return;
+                              await apiClient.deletePart(id, p.id);
+                              loadParts();
+                            }} className="text-red-400 hover:text-red-300 transition-colors text-xs">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <Modal isOpen={partModal} onClose={() => setPartModal(false)} title={editPart ? 'Edit Part' : 'Add Part'}>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setSaving(true);
+              setFormError('');
+              try {
+                const payload = { ...partForm, part_number: partForm.part_number || undefined, brand: partForm.brand || undefined, notes: partForm.notes || undefined };
+                if (editPart) {
+                  await apiClient.updatePart(id, editPart.id, payload);
+                } else {
+                  await apiClient.createPart(id, payload);
+                }
+                setPartModal(false);
+                loadParts();
+              } catch {
+                setFormError('Failed to save part');
+              } finally {
+                setSaving(false);
+              }
+            }} className="space-y-4">
+              <FormError msg={formError} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-sm text-slate-300 mb-1">Part Name *</label>
+                  <input className="input-field" placeholder="e.g. Oil Filter" value={partForm.name} onChange={(e) => setPartForm((p) => ({ ...p, name: e.target.value }))} required />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Part Number</label>
+                  <input className="input-field font-mono" placeholder="e.g. PF63E" value={partForm.part_number} onChange={(e) => setPartForm((p) => ({ ...p, part_number: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Brand</label>
+                  <input className="input-field" placeholder="e.g. ACDelco" value={partForm.brand} onChange={(e) => setPartForm((p) => ({ ...p, brand: e.target.value }))} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm text-slate-300 mb-1">Category</label>
+                  <select className="input-field" value={partForm.category} onChange={(e) => setPartForm((p) => ({ ...p, category: e.target.value }))}>
+                    {['filters', 'engine', 'drivetrain', 'brakes', 'suspension', 'electrical', 'trailer', 'other'].map((c) => (
+                      <option key={c} value={c} className="capitalize">{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm text-slate-300 mb-1">Notes</label>
+                  <input className="input-field" placeholder="Optional notes" value={partForm.notes} onChange={(e) => setPartForm((p) => ({ ...p, notes: e.target.value }))} />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : editPart ? 'Update' : 'Add Part'}</button>
+                <button type="button" onClick={() => setPartModal(false)} className="btn-secondary flex-1">Cancel</button>
+              </div>
+            </form>
+          </Modal>
+        </div>
+      )}
+
+      {/* ── SPECS EDIT MODAL ─────────────────────────────────────────────────────── */}
+      <Modal isOpen={specsEditModal} onClose={() => setSpecsEditModal(false)} title="Edit Vehicle Specs">
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          setSaving(true);
+          try {
+            const overrides: Record<string, string> = {};
+            const base = vehicle.nhtsa_data || {};
+            for (const [k, v] of Object.entries(specsForm)) {
+              if (v !== String(base[k] ?? '')) overrides[k] = v;
+            }
+            const updated = await apiClient.updateSpecsOverrides(id, overrides);
+            setVehicle(updated);
+            setSpecsEditModal(false);
+          } catch {
+            setFormError('Failed to save');
+          } finally {
+            setSaving(false);
+          }
+        }} className="space-y-3">
+          <p className="text-slate-400 text-xs">Overridden values shown in teal on the summary tab.</p>
+          {([
+            ['engine_model', 'Engine Model'],
+            ['engine_displacement_l', 'Displacement (L)'],
+            ['engine_cylinders', 'Cylinders'],
+            ['engine_hp', 'Horsepower'],
+            ['turbo', 'Turbocharged'],
+            ['fuel_type', 'Fuel Type'],
+            ['drive_type', 'Drive Type'],
+            ['transmission_type', 'Transmission Style'],
+            ['transmission_speeds', 'Transmission Speeds'],
+            ['body_class', 'Body Class'],
+            ['cab_type', 'Cab Type'],
+            ['doors', 'Doors'],
+            ['series', 'Series'],
+            ['trim', 'Trim'],
+            ['gvwr', 'GVWR'],
+          ] as [string, string][]).map(([key, label]) => (
+            <div key={key}>
+              <label className="block text-xs text-slate-400 mb-1">{label}</label>
+              <input
+                className="input-field text-sm"
+                value={specsForm[key] || ''}
+                onChange={(e) => setSpecsForm((p) => ({ ...p, [key]: e.target.value }))}
+              />
+            </div>
+          ))}
+          <div className="flex gap-3 pt-2">
+            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : 'Save Overrides'}</button>
+            <button type="button" onClick={() => setSpecsEditModal(false)} className="btn-secondary flex-1">Cancel</button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

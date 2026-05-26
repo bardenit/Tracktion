@@ -16,7 +16,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
     user = User(
         email=user_data.email,
-        hashed_password=hash_password(user_data.password),
+        password_hash=hash_password(user_data.password),
     )
     db.add(user)
     db.commit()
@@ -27,7 +27,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
-    if not user or not verify_password(credentials.password, user.hashed_password):
+    if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -61,3 +61,27 @@ def refresh(body: dict, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/needs-setup")
+def needs_setup(db: Session = Depends(get_db)):
+    return {"needs_setup": db.query(User).count() == 0}
+
+
+@router.post("/change-password")
+def change_password(
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current = body.get("current_password")
+    new = body.get("new_password")
+    if not current or not new:
+        raise HTTPException(status_code=400, detail="Both current and new password required")
+    if len(new) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    if not verify_password(current, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    current_user.password_hash = hash_password(new)
+    db.commit()
+    return {"message": "Password updated"}

@@ -123,6 +123,97 @@ class ApiClient {
     return response.data;
   }
 
+  async lookupVin(vin: string) {
+    const response = await this.client.get(`/vehicles/vin-lookup`, { params: { vin } });
+    return response.data;
+  }
+
+  async updateSpecsOverrides(vehicleId: number, overrides: Record<string, string>) {
+    const response = await this.client.put(`/vehicles/${vehicleId}`, { specs_overrides: overrides });
+    return response.data;
+  }
+
+  // Parts endpoints
+  async listParts(vehicleId: number) {
+    const response = await this.client.get(`/parts/${vehicleId}/parts`);
+    return response.data;
+  }
+
+  async createPart(vehicleId: number, partData: any) {
+    const response = await this.client.post(`/parts/${vehicleId}/parts`, partData);
+    return response.data;
+  }
+
+  async updatePart(vehicleId: number, partId: number, partData: any) {
+    const response = await this.client.put(`/parts/${vehicleId}/parts/${partId}`, partData);
+    return response.data;
+  }
+
+  async deletePart(vehicleId: number, partId: number) {
+    const response = await this.client.delete(`/parts/${vehicleId}/parts/${partId}`);
+    return response.data;
+  }
+
+  // Trip endpoints
+  async listTrips(vehicleId: number) {
+    const response = await this.client.get(`/trips/${vehicleId}/entries`);
+    return response.data;
+  }
+
+  async createTrip(vehicleId: number, tripData: any) {
+    const response = await this.client.post(`/trips/${vehicleId}/entries`, tripData);
+    return response.data;
+  }
+
+  async updateTrip(vehicleId: number, tripId: number, tripData: any) {
+    const response = await this.client.put(`/trips/${vehicleId}/entries/${tripId}`, tripData);
+    return response.data;
+  }
+
+  async deleteTrip(vehicleId: number, tripId: number) {
+    const response = await this.client.delete(`/trips/${vehicleId}/entries/${tripId}`);
+    return response.data;
+  }
+
+  async getTripStats(vehicleId: number) {
+    const response = await this.client.get(`/trips/${vehicleId}/stats`);
+    return response.data;
+  }
+
+  // Setup / Settings
+  async changePassword(currentPassword: string, newPassword: string) {
+    const response = await this.client.post('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return response.data;
+  }
+
+  async updateVehicleMileage(vehicleId: number, mileage: number) {
+    const response = await this.client.put(`/vehicles/${vehicleId}`, { current_mileage: mileage });
+    return response.data;
+  }
+
+  async needsSetup() {
+    const response = await this.client.get('/auth/needs-setup');
+    return response.data;
+  }
+
+  async getDbSettings() {
+    const response = await this.client.get('/settings/db');
+    return response.data;
+  }
+
+  async testDbConnection(settings: any) {
+    const response = await this.client.post('/settings/db/test', settings);
+    return response.data;
+  }
+
+  async saveDbSettings(settings: any) {
+    const response = await this.client.post('/settings/db', settings);
+    return response.data;
+  }
+
   // Fuel endpoints
   async createFuelEntry(vehicleId: number, entryData: any) {
     const response = await this.client.post(`/fuel/${vehicleId}/entries`, entryData);

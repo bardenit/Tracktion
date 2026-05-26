@@ -31,21 +31,28 @@ class UserResponse(BaseModel):
 
 # Vehicle Schemas
 class VehicleCreate(BaseModel):
+    nickname: Optional[str] = None
+    vehicle_type: str = "vehicle"
     make: str
     model: str
     year: int
     vin: Optional[str] = None
     current_mileage: float = 0
     fuel_type: str = "gasoline"
+    axle_count: Optional[int] = None
 
 
 class VehicleUpdate(BaseModel):
+    nickname: Optional[str] = None
+    vehicle_type: Optional[str] = None
     make: Optional[str] = None
     model: Optional[str] = None
     year: Optional[int] = None
     vin: Optional[str] = None
     current_mileage: Optional[float] = None
     fuel_type: Optional[str] = None
+    axle_count: Optional[int] = None
+    specs_overrides: Optional[dict] = None
 
 
 class VINDecodeResponse(BaseModel):
@@ -53,24 +60,74 @@ class VINDecodeResponse(BaseModel):
     make: Optional[str] = None
     model: Optional[str] = None
     year: Optional[int] = None
-    engine_hp: Optional[str] = None
+    # Engine
+    engine_model: Optional[str] = None
     engine_cylinders: Optional[str] = None
-    transmission_type: Optional[str] = None
-    drive_type: Optional[str] = None
+    engine_displacement_l: Optional[str] = None
+    engine_hp: Optional[str] = None
+    turbo: Optional[str] = None
     fuel_type: Optional[str] = None
+    # Drivetrain
+    transmission_type: Optional[str] = None
+    transmission_speeds: Optional[str] = None
+    drive_type: Optional[str] = None
+    # Body
+    body_class: Optional[str] = None
+    cab_type: Optional[str] = None
     doors: Optional[str] = None
+    # Trim / identity
+    series: Optional[str] = None
+    trim: Optional[str] = None
+    gvwr: Optional[str] = None
+    # Origin
+    plant_city: Optional[str] = None
+    plant_country: Optional[str] = None
 
 
 class VehicleResponse(BaseModel):
     id: int
     user_id: int
+    nickname: Optional[str] = None
+    vehicle_type: str = "vehicle"
     make: str
     model: str
     year: int
     vin: Optional[str]
     current_mileage: float
     fuel_type: str
+    axle_count: Optional[int] = None
     nhtsa_data: Optional[dict] = None
+    specs_overrides: Optional[dict] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class VehiclePartCreate(BaseModel):
+    name: str
+    part_number: Optional[str] = None
+    brand: Optional[str] = None
+    category: str = "other"
+    notes: Optional[str] = None
+
+
+class VehiclePartUpdate(BaseModel):
+    name: Optional[str] = None
+    part_number: Optional[str] = None
+    brand: Optional[str] = None
+    category: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class VehiclePartResponse(BaseModel):
+    id: int
+    vehicle_id: int
+    name: str
+    part_number: Optional[str] = None
+    brand: Optional[str] = None
+    category: str
+    notes: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -239,3 +296,55 @@ class VehicleStats(BaseModel):
     fuel_stats: FuelStats
     maintenance_stats: MaintenanceStats
     total_expenses: float
+
+
+# Trip Entry Schemas
+class TripEntryCreate(BaseModel):
+    date: date
+    miles: float
+    destination: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TripEntryUpdate(BaseModel):
+    date: Optional[date] = None
+    miles: Optional[float] = None
+    destination: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TripEntryResponse(BaseModel):
+    id: int
+    vehicle_id: int
+    date: date
+    miles: float
+    destination: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TripStats(BaseModel):
+    total_miles: float
+    trip_count: int
+    last_trip_date: Optional[date] = None
+
+
+# Settings Schemas
+class DBSettings(BaseModel):
+    type: str  # sqlite, postgresql, mysql
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+class DBSettingsResponse(BaseModel):
+    type: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
+    username: Optional[str] = None

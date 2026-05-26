@@ -32,13 +32,17 @@ class Vehicle(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    nickname = Column(String(100), nullable=True)
+    vehicle_type = Column(String(50), default="vehicle")  # vehicle, trailer
     make = Column(String(255))
     model = Column(String(255))
     year = Column(Integer)
     vin = Column(String(17), unique=True, index=True, nullable=True)
     current_mileage = Column(Float, default=0)
     fuel_type = Column(String(50), default=FuelType.GASOLINE)
-    nhtsa_data = Column(JSON, nullable=True)  # Cached VIN decode data
+    axle_count = Column(Integer, nullable=True)
+    nhtsa_data = Column(JSON, nullable=True)
+    specs_overrides = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -49,6 +53,8 @@ class Vehicle(Base):
     documents = relationship("Document", back_populates="vehicle", cascade="all, delete-orphan")
     maintenance_reminders = relationship("MaintenanceReminder", back_populates="vehicle", cascade="all, delete-orphan")
     collaborators = relationship("VehicleCollaborator", back_populates="vehicle", cascade="all, delete-orphan")
+    parts = relationship("VehiclePart", back_populates="vehicle", cascade="all, delete-orphan")
+    trip_entries = relationship("TripEntry", back_populates="vehicle", cascade="all, delete-orphan")
 
 
 class VehicleCollaborator(Base):
@@ -145,6 +151,36 @@ class MaintenanceReminder(Base):
     vehicle = relationship("Vehicle", back_populates="maintenance_reminders")
 
 
+class TripEntry(Base):
+    __tablename__ = "trip_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), index=True)
+    date = Column(Date, index=True)
+    miles = Column(Float)
+    destination = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    vehicle = relationship("Vehicle", back_populates="trip_entries")
+
+
+class VehiclePart(Base):
+    __tablename__ = "vehicle_parts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), index=True)
+    name = Column(String(255))
+    part_number = Column(String(100), nullable=True)
+    brand = Column(String(100), nullable=True)
+    category = Column(String(50), default="other")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    vehicle = relationship("Vehicle", back_populates="parts")
+
+
 __all__ = [
     "User",
     "Vehicle",
@@ -154,4 +190,6 @@ __all__ = [
     "Expense",
     "Document",
     "MaintenanceReminder",
+    "VehiclePart",
+    "TripEntry",
 ]
