@@ -152,11 +152,13 @@ def list_storage_buckets(s: StorageSettings, current_user: User = Depends(get_cu
         raise HTTPException(status_code=400, detail="Bucket listing is only supported for S3-compatible storage")
     try:
         import boto3
+        from botocore.config import Config
         stored_secret = get_config().get("storage", {}).get("secret_key", "")
         kwargs: dict = {
             "aws_access_key_id": s.access_key,
             "aws_secret_access_key": s.secret_key or stored_secret,
             "region_name": s.region or "us-east-1",
+            "config": Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         }
         if s.endpoint:
             kwargs["endpoint_url"] = s.endpoint

@@ -42,11 +42,13 @@ class LocalStorage(StorageBackend):
 class S3Storage(StorageBackend):
     def __init__(self, cfg: dict):
         import boto3
+        from botocore.config import Config
         self.bucket = cfg['bucket']
         kwargs: dict = {
             'aws_access_key_id': cfg.get('access_key'),
             'aws_secret_access_key': cfg.get('secret_key'),
             'region_name': cfg.get('region') or 'us-east-1',
+            'config': Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
         }
         if cfg.get('endpoint'):
             kwargs['endpoint_url'] = cfg['endpoint']
