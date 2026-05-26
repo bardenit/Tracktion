@@ -57,11 +57,21 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   checkAuth: async () => {
+    if (!localStorage.getItem('accessToken')) {
+      set({ user: null, isAuthenticated: false });
+      return;
+    }
+    // Optimistically trust the stored token — interceptor handles refresh
+    set({ isAuthenticated: true });
     try {
       const user = await apiClient.getCurrentUser();
       set({ user, isAuthenticated: true });
-    } catch {
-      set({ user: null, isAuthenticated: false });
+    } catch (error: any) {
+      // Only force logout on a definitive auth rejection, not network errors
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        apiClient.logout();
+        set({ user: null, isAuthenticated: false });
+      }
     }
   },
 }));
