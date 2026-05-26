@@ -62,7 +62,7 @@ class S3Storage(StorageBackend):
         self.s3.delete_object(Bucket=self.bucket, Key=path)
 
     def test(self) -> None:
-        self.s3.head_bucket(Bucket=self.bucket)
+        self.s3.list_objects_v2(Bucket=self.bucket, MaxKeys=1)
 
 
 class WebDAVStorage(StorageBackend):
