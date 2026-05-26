@@ -421,7 +421,9 @@ class ApiClient {
   async uploadVehiclePhoto(vehicleId: number, file: File): Promise<void> {
     const form = new FormData();
     form.append('file', file);
-    await this.client.post(`/documents/${vehicleId}/photo`, form);
+    await this.client.post(`/documents/${vehicleId}/photo`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   }
 
   async deleteVehiclePhoto(vehicleId: number): Promise<void> {

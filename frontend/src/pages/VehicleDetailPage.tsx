@@ -529,8 +529,8 @@ export default function VehicleDetailPage() {
         setPhotoUrl(url);
       }
       addToast('success', 'Photo saved');
-    } catch {
-      addToast('error', 'Upload failed');
+    } catch (err: any) {
+      addToast('error', err?.response?.data?.detail || 'Upload failed');
     } finally {
       setPhotoUploading(false);
       if (e.target) e.target.value = '';
