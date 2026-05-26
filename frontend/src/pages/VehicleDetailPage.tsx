@@ -784,11 +784,11 @@ export default function VehicleDetailPage() {
           )}
         </div>
         {photoUrl ? (
-          <div className="relative group flex-shrink-0 max-w-xs rounded-lg overflow-hidden">
+          <div className="relative group rounded-lg overflow-hidden flex-shrink-0">
             <img
               src={photoUrl}
               alt={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
-              className="w-full h-auto"
+              className="h-20 w-auto"
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
             <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
