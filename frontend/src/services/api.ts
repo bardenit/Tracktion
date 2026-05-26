@@ -234,6 +234,11 @@ class ApiClient {
     return response.data;
   }
 
+  async listStorageBuckets(settings: any) {
+    const response = await this.client.post('/settings/storage/buckets', settings);
+    return response.data;
+  }
+
   async getIntegrationsSettings() {
     const response = await this.client.get('/settings/integrations');
     return response.data;

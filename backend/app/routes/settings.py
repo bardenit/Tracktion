@@ -146,6 +146,27 @@ def save_storage_settings(s: StorageSettings, current_user: User = Depends(get_c
     return {"message": "Storage settings saved. New uploads will use the updated backend immediately."}
 
 
+@router.post("/storage/buckets")
+def list_storage_buckets(s: StorageSettings, current_user: User = Depends(get_current_user)):
+    if s.type != "s3":
+        raise HTTPException(status_code=400, detail="Bucket listing is only supported for S3-compatible storage")
+    try:
+        import boto3
+        stored_secret = get_config().get("storage", {}).get("secret_key", "")
+        kwargs: dict = {
+            "aws_access_key_id": s.access_key,
+            "aws_secret_access_key": s.secret_key or stored_secret,
+            "region_name": s.region or "us-east-1",
+        }
+        if s.endpoint:
+            kwargs["endpoint_url"] = s.endpoint
+        client = boto3.client("s3", **kwargs)
+        response = client.list_buckets()
+        return {"buckets": [b["Name"] for b in response.get("Buckets", [])]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not list buckets: {e}")
+
+
 def _build_storage(s: StorageSettings):
     from app.storage import LocalStorage, S3Storage, WebDAVStorage
     if s.type == "s3":

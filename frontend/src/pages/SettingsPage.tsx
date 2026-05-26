@@ -38,11 +38,14 @@ export default function SettingsPage() {
 
   // ── Storage ───────────────────────────────────────────────────────────────
   const [storageType, setStorageType] = useState<StorageType>('local');
+  const [s3Provider, setS3Provider] = useState('');
   const [s3Endpoint, setS3Endpoint] = useState('');
   const [s3Bucket, setS3Bucket] = useState('');
   const [s3Region, setS3Region] = useState('');
   const [s3AccessKey, setS3AccessKey] = useState('');
   const [s3SecretKey, setS3SecretKey] = useState('');
+  const [buckets, setBuckets] = useState<string[] | null>(null);
+  const [bucketsLoading, setBucketsLoading] = useState(false);
   const [wdUrl, setWdUrl] = useState('');
   const [wdUsername, setWdUsername] = useState('');
   const [wdPassword, setWdPassword] = useState('');
@@ -150,6 +153,18 @@ export default function SettingsPage() {
       path: wdPath || '/tracktion',
     } : {}),
   });
+
+  const handleLoadBuckets = async () => {
+    setBucketsLoading(true);
+    setStorageStatus(null);
+    try {
+      const r = await apiClient.listStorageBuckets(buildStoragePayload());
+      setBuckets(r.buckets);
+      setStorageStatus({ type: 'success', msg: `Found ${r.buckets.length} bucket${r.buckets.length !== 1 ? 's' : ''}` });
+    } catch (err: any) {
+      setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Could not list buckets' });
+    } finally { setBucketsLoading(false); }
+  };
 
   const handleTestStorage = async () => {
     setStorageLoading(true); setStorageStatus(null);
@@ -351,7 +366,7 @@ export default function SettingsPage() {
                 { id: 's3', label: 'S3-compatible' },
                 { id: 'webdav', label: 'WebDAV' },
               ] as { id: StorageType; label: string }[]).map((t) => (
-                <button key={t.id} onClick={() => { setStorageType(t.id); setStorageStatus(null); }}
+                <button key={t.id} onClick={() => { setStorageType(t.id); setStorageStatus(null); setBuckets(null); setS3Provider(''); }}
                   className={`py-2 px-3 rounded border text-sm font-medium transition-colors ${
                     storageType === t.id ? 'border-teal-500 bg-teal-900/30 text-teal-300' : 'border-slate-600 text-slate-400 hover:border-slate-500'
                   }`}>
@@ -370,31 +385,93 @@ export default function SettingsPage() {
           )}
 
           {storageType === 's3' && (
-            <div className="space-y-3">
-              <p className="text-slate-500 text-xs">Works with AWS S3, Backblaze B2, Wasabi, Cloudflare R2, and any S3-compatible service.</p>
+            <div className="space-y-4">
+              {/* Provider quick-select */}
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Endpoint URL <span className="text-slate-500">(leave blank for AWS)</span></label>
-                <input className="input-field font-mono text-sm" placeholder="https://s3.us-west-002.backblazeb2.com" value={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">Bucket</label>
-                  <input className="input-field" placeholder="my-tracktion-docs" value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} />
+                <label className="block text-sm text-slate-300 mb-2">Provider</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'aws',    label: 'AWS S3',        endpoint: '',                                                   region: 'us-east-1' },
+                    { id: 'b2',     label: 'Backblaze B2',  endpoint: 'https://s3.us-west-002.backblazeb2.com',             region: 'us-west-002' },
+                    { id: 'wasabi', label: 'Wasabi',         endpoint: 'https://s3.wasabisys.com',                          region: 'us-east-1' },
+                    { id: 'r2',     label: 'Cloudflare R2', endpoint: 'https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com',   region: 'auto' },
+                    { id: 'do',     label: 'DO Spaces',     endpoint: 'https://nyc3.digitaloceanspaces.com',                region: 'nyc3' },
+                    { id: 'custom', label: 'Custom',        endpoint: '',                                                   region: '' },
+                  ].map((p) => (
+                    <button key={p.id} type="button"
+                      onClick={() => {
+                        setS3Provider(p.id);
+                        setS3Endpoint(p.endpoint);
+                        setS3Region(p.region);
+                        setBuckets(null);
+                        setStorageStatus(null);
+                      }}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        s3Provider === p.id
+                          ? 'border-teal-500 bg-teal-900/40 text-teal-300'
+                          : 'border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+                      }`}>
+                      {p.label}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">Region</label>
-                  <input className="input-field" placeholder="us-east-1" value={s3Region} onChange={(e) => setS3Region(e.target.value)} />
-                </div>
               </div>
-              <div>
-                <label className="block text-sm text-slate-300 mb-1">Access Key ID</label>
-                <input className="input-field font-mono text-sm" value={s3AccessKey} onChange={(e) => setS3AccessKey(e.target.value)} />
-              </div>
+
               <div>
                 <label className="block text-sm text-slate-300 mb-1">
-                  Secret Access Key {storageHasSecret && <span className="text-slate-500">(stored — leave blank to keep)</span>}
+                  Endpoint URL <span className="text-slate-500 text-xs">(blank for AWS)</span>
                 </label>
-                <input className="input-field font-mono text-sm" type="password" placeholder={storageHasSecret ? '••••••••' : ''} value={s3SecretKey} onChange={(e) => setS3SecretKey(e.target.value)} />
+                <input className="input-field font-mono text-sm" placeholder="https://s3.us-west-002.backblazeb2.com"
+                  value={s3Endpoint} onChange={(e) => { setS3Endpoint(e.target.value); setBuckets(null); }} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Region</label>
+                  <input className="input-field" placeholder="us-east-1" value={s3Region}
+                    onChange={(e) => setS3Region(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Access Key ID</label>
+                  <input className="input-field font-mono text-sm" value={s3AccessKey}
+                    onChange={(e) => { setS3AccessKey(e.target.value); setBuckets(null); }} />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">
+                  Secret Access Key {storageHasSecret && <span className="text-slate-500 text-xs">(stored — blank to keep)</span>}
+                </label>
+                <input className="input-field font-mono text-sm" type="password"
+                  placeholder={storageHasSecret ? '••••••••' : ''}
+                  value={s3SecretKey} onChange={(e) => { setS3SecretKey(e.target.value); setBuckets(null); }} />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm text-slate-300">Bucket</label>
+                  {buckets ? (
+                    <button type="button" onClick={() => setBuckets(null)}
+                      className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                      Type manually
+                    </button>
+                  ) : (
+                    <button type="button" onClick={handleLoadBuckets}
+                      disabled={bucketsLoading || (!s3AccessKey) || (!s3SecretKey && !storageHasSecret)}
+                      className="text-xs text-teal-400 hover:text-teal-300 disabled:opacity-40 transition-colors">
+                      {bucketsLoading ? 'Loading...' : '↓ Load buckets'}
+                    </button>
+                  )}
+                </div>
+                {buckets ? (
+                  <select className="input-field" value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)}>
+                    <option value="">— Select a bucket —</option>
+                    {buckets.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                ) : (
+                  <input className="input-field" placeholder="my-tracktion-docs"
+                    value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} />
+                )}
               </div>
             </div>
           )}
