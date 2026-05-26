@@ -51,6 +51,7 @@ export default function SettingsPage() {
   const [wdPassword, setWdPassword] = useState('');
   const [wdPath, setWdPath] = useState('/tracktion');
   const [storageHasSecret, setStorageHasSecret] = useState(false);
+  const [storageBanner, setStorageBanner] = useState<string | null>(null);
   const [storageLoading, setStorageLoading] = useState(false);
   const [storageStatus, setStorageStatus] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
 
@@ -83,6 +84,13 @@ export default function SettingsPage() {
         setWdUsername(s.username || '');
         setWdPath(s.path || '/tracktion');
         setStorageHasSecret(s.has_secret || false);
+        if (s.type === 'local') setStorageBanner('Local filesystem');
+        else if (s.type === 's3') {
+          const ep = (s.endpoint || 'AWS S3').replace('https://', '');
+          setStorageBanner(`S3-compatible — ${ep}${s.bucket ? `/${s.bucket}` : ''}`);
+        } else if (s.type === 'webdav') {
+          setStorageBanner(`WebDAV — ${(s.url || '').replace('https://', '').replace('http://', '')}`);
+        }
       }).catch(() => {});
     }
     if (activeTab === 'integrations') {
@@ -182,6 +190,13 @@ export default function SettingsPage() {
       setStorageStatus({ type: 'info', msg: r.message });
       setS3SecretKey(''); setWdPassword('');
       addToast('success', 'Storage settings saved');
+      if (storageType === 'local') setStorageBanner('Local filesystem');
+      else if (storageType === 's3') {
+        const ep = (s3Endpoint || 'AWS S3').replace('https://', '');
+        setStorageBanner(`S3-compatible — ${ep}${s3Bucket ? `/${s3Bucket}` : ''}`);
+      } else if (storageType === 'webdav') {
+        setStorageBanner(`WebDAV — ${wdUrl.replace('https://', '').replace('http://', '')}`);
+      }
     } catch (err: any) { setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Save failed' }); }
     finally { setStorageLoading(false); }
   };
@@ -354,7 +369,14 @@ export default function SettingsPage() {
       {activeTab === 'storage' && (
         <div className="card max-w-lg space-y-5">
           <div>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">Document Storage</h2>
+            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Document Storage</h2>
+            {storageBanner && (
+              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-2 text-sm mb-2">
+                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="text-slate-300"><span className="text-slate-400">Active: </span>
+                  <span className="text-white font-medium">{storageBanner}</span></span>
+              </div>
+            )}
             <p className="text-slate-500 text-xs">Where uploaded documents are stored. New uploads use the active backend immediately — no restart needed.</p>
           </div>
 
@@ -392,7 +414,7 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-2">
                   {[
                     { id: 'aws',    label: 'AWS S3',        endpoint: '',                                                   region: 'us-east-1' },
-                    { id: 'b2',     label: 'Backblaze B2',  endpoint: 'https://s3.us-west-002.backblazeb2.com',             region: 'us-west-002' },
+                    { id: 'b2',     label: 'Backblaze B2',  endpoint: '',                                                  region: '' },
                     { id: 'wasabi', label: 'Wasabi',         endpoint: 'https://s3.wasabisys.com',                          region: 'us-east-1' },
                     { id: 'r2',     label: 'Cloudflare R2', endpoint: 'https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com',   region: 'auto' },
                     { id: 'do',     label: 'DO Spaces',     endpoint: 'https://nyc3.digitaloceanspaces.com',                region: 'nyc3' },
@@ -421,8 +443,11 @@ export default function SettingsPage() {
                 <label className="block text-sm text-slate-300 mb-1">
                   Endpoint URL <span className="text-slate-500 text-xs">(blank for AWS)</span>
                 </label>
-                <input className="input-field font-mono text-sm" placeholder="https://s3.us-west-002.backblazeb2.com"
+                <input className="input-field font-mono text-sm" placeholder="https://s3.{region}.backblazeb2.com"
                   value={s3Endpoint} onChange={(e) => { setS3Endpoint(e.target.value); setBuckets(null); }} />
+                {s3Provider === 'b2' && (
+                  <p className="text-xs text-slate-500 mt-1">Find your endpoint in B2 Dashboard → Buckets → your bucket → Endpoint</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
