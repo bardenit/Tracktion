@@ -140,6 +140,8 @@ class MaintenanceReminder(Base):
     service_type = Column(String(255))
     interval_miles = Column(Float, nullable=True)
     interval_days = Column(Integer, nullable=True)
+    target_mileage = Column(Float, nullable=True)   # absolute odometer target
+    reminder_miles = Column(Integer, nullable=True)  # warn X miles before due
     last_performed_mileage = Column(Float, nullable=True)
     last_performed_date = Column(Date, nullable=True)
     next_due_mileage = Column(Float, nullable=True)

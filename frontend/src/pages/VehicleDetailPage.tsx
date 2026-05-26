@@ -66,6 +66,8 @@ interface Reminder {
   service_type: string;
   interval_miles?: number;
   interval_days?: number;
+  target_mileage?: number;
+  reminder_miles?: number;
   last_performed_mileage?: number;
   next_due_mileage?: number;
   next_due_date?: string;
@@ -262,7 +264,8 @@ export default function VehicleDetailPage() {
   const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '' });
   const [gpsLoading, setGpsLoading] = useState(false);
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
-  const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '' });
+  const [reminderTrigger, setReminderTrigger] = useState<'interval' | 'target'>('interval');
+  const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
   const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '' });
   const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
@@ -284,12 +287,14 @@ export default function VehicleDetailPage() {
   }, [id]);
 
   const loadMaintenance = useCallback(async () => {
-    const [entries, rems] = await Promise.all([
+    const [entries, rems, fuel] = await Promise.all([
       apiClient.listMaintenanceEntries(id),
       apiClient.listMaintenanceReminders(id),
+      apiClient.listFuelEntries(id),
     ]);
     setMaintEntries(entries);
     setReminders(rems);
+    setFuelEntries(fuel);
   }, [id]);
 
   const loadExpenses = useCallback(async () => {
@@ -456,8 +461,10 @@ export default function VehicleDetailPage() {
     try {
       await apiClient.createMaintenanceReminder(id, {
         service_type: reminderForm.service_type,
-        interval_miles: reminderForm.interval_miles ? Number(reminderForm.interval_miles) : undefined,
-        interval_days: reminderForm.interval_days ? Number(reminderForm.interval_days) : undefined,
+        interval_miles: reminderTrigger === 'interval' && reminderForm.interval_miles ? Number(reminderForm.interval_miles) : undefined,
+        interval_days: reminderTrigger === 'interval' && reminderForm.interval_days ? Number(reminderForm.interval_days) : undefined,
+        target_mileage: reminderTrigger === 'target' && reminderForm.target_mileage ? Number(reminderForm.target_mileage) : undefined,
+        reminder_miles: reminderForm.reminder_miles ? Number(reminderForm.reminder_miles) : 500,
       });
       setReminderModal(false);
       loadMaintenance().catch(console.error);
@@ -534,14 +541,34 @@ export default function VehicleDetailPage() {
     addToast('success', 'Document deleted');
   };
 
-  // ─── Reminder status helper ──────────────────────────────────────────────────
+  // ─── Reminder helpers ────────────────────────────────────────────────────────
+
+  const avgMilesPerDay = (): number | null => {
+    if (fuelEntries.length < 2) return null;
+    const sorted = [...fuelEntries].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const days = (new Date(sorted[sorted.length - 1].date).getTime() - new Date(sorted[0].date).getTime()) / 86400000;
+    const miles = sorted[sorted.length - 1].mileage - sorted[0].mileage;
+    return days > 0 && miles > 0 ? miles / days : null;
+  };
+
+  const reminderEta = (r: Reminder): { daysLeft: number; estDate: Date } | null => {
+    if (!r.next_due_mileage || !vehicle) return null;
+    const milesLeft = r.next_due_mileage - vehicle.current_mileage;
+    if (milesLeft <= 0) return null;
+    const avg = avgMilesPerDay();
+    if (!avg) return null;
+    const daysLeft = Math.round(milesLeft / avg);
+    return { daysLeft, estDate: new Date(Date.now() + daysLeft * 86400000) };
+  };
 
   const reminderStatus = (r: Reminder) => {
+    const threshold = r.reminder_miles ?? 500;
     if (r.is_overdue) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
     if (r.next_due_mileage && vehicle) {
       const remaining = r.next_due_mileage - vehicle.current_mileage;
-      if (remaining <= 500)
-        return { color: 'text-amber-400', bg: 'bg-amber-900/30', label: `${remaining.toLocaleString()} mi` };
+      if (remaining <= 0) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
+      if (remaining <= threshold)
+        return { color: 'text-amber-400', bg: 'bg-amber-900/30', label: `${remaining.toLocaleString()} mi left` };
     }
     return { color: 'text-green-400', bg: 'bg-green-900/20', label: 'OK' };
   };
@@ -1024,7 +1051,8 @@ export default function VehicleDetailPage() {
               <h2 className="text-lg font-semibold text-white">Reminders</h2>
               <button
                 onClick={() => {
-                  setReminderForm({ service_type: 'Oil Change', interval_miles: '', interval_days: '' });
+                  setReminderTrigger('interval');
+                  setReminderForm({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
                   setFormError('');
                   setReminderModal(true);
                 }}
@@ -1042,18 +1070,32 @@ export default function VehicleDetailPage() {
                   return (
                     <div key={r.id} className={`${s.bg} border border-slate-700 rounded-lg p-4`}>
                       <div className="flex items-start justify-between">
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <p className="font-medium text-white">{r.service_type}</p>
                           <p className="text-slate-400 text-xs mt-1">
-                            {r.interval_miles ? `Every ${r.interval_miles.toLocaleString()} mi` : ''}
-                            {r.interval_miles && r.interval_days ? ' · ' : ''}
-                            {r.interval_days ? `Every ${r.interval_days} days` : ''}
+                            {r.target_mileage
+                              ? `At ${r.target_mileage.toLocaleString()} mi`
+                              : [
+                                  r.interval_miles ? `Every ${r.interval_miles.toLocaleString()} mi` : '',
+                                  r.interval_days ? `Every ${r.interval_days} days` : '',
+                                ].filter(Boolean).join(' · ')}
                           </p>
                           {r.next_due_mileage && (
                             <p className="text-slate-400 text-xs mt-0.5">
                               Due at {r.next_due_mileage.toLocaleString()} mi
+                              {r.reminder_miles ? ` · alert at ${(r.next_due_mileage - r.reminder_miles).toLocaleString()} mi` : ''}
                             </p>
                           )}
+                          {(() => {
+                            const eta = reminderEta(r);
+                            if (!eta) return null;
+                            const mo = eta.estDate.toLocaleString('default', { month: 'short', day: 'numeric' });
+                            return (
+                              <p className="text-teal-400 text-xs mt-0.5">
+                                ~{eta.daysLeft} days · est. {mo}
+                              </p>
+                            );
+                          })()}
                         </div>
                         <div className="flex items-center gap-2 ml-4">
                           <span className={`text-xs font-semibold ${s.color}`}>{s.label}</span>
@@ -1191,21 +1233,61 @@ export default function VehicleDetailPage() {
                   {SERVICE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">Interval (miles)</label>
-                  <input type="number" className="input-field" min="1" placeholder="e.g. 5000"
-                    value={reminderForm.interval_miles}
-                    onChange={(e) => setReminderForm((p) => ({ ...p, interval_miles: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">Interval (days)</label>
-                  <input type="number" className="input-field" min="1" placeholder="e.g. 90"
-                    value={reminderForm.interval_days}
-                    onChange={(e) => setReminderForm((p) => ({ ...p, interval_days: e.target.value }))} />
+
+              {/* Trigger type toggle */}
+              <div>
+                <label className="block text-sm text-slate-300 mb-2">Schedule</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['interval', 'target'] as const).map((t) => (
+                    <button key={t} type="button" onClick={() => setReminderTrigger(t)}
+                      className={`py-2 px-3 rounded border text-sm font-medium transition-colors ${
+                        reminderTrigger === t ? 'border-teal-500 bg-teal-900/30 text-teal-300' : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                      }`}>
+                      {t === 'interval' ? 'Recurring interval' : 'At mileage'}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <p className="text-slate-400 text-xs">Fill in at least one interval.</p>
+
+              {reminderTrigger === 'interval' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">Every (miles)</label>
+                    <input type="number" className="input-field" min="1" placeholder="e.g. 5000"
+                      value={reminderForm.interval_miles}
+                      onChange={(e) => setReminderForm((p) => ({ ...p, interval_miles: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">Every (days)</label>
+                    <input type="number" className="input-field" min="1" placeholder="e.g. 90"
+                      value={reminderForm.interval_days}
+                      onChange={(e) => setReminderForm((p) => ({ ...p, interval_days: e.target.value }))} />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Target odometer (miles) *</label>
+                  <input type="number" className="input-field" min="1" placeholder="e.g. 50000"
+                    value={reminderForm.target_mileage}
+                    onChange={(e) => setReminderForm((p) => ({ ...p, target_mileage: e.target.value }))} />
+                  <p className="text-slate-500 text-xs mt-1">Current odometer: {vehicle?.current_mileage.toLocaleString()} mi</p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Alert me when within (miles)</label>
+                <input type="number" className="input-field" min="1" placeholder="500"
+                  value={reminderForm.reminder_miles}
+                  onChange={(e) => setReminderForm((p) => ({ ...p, reminder_miles: e.target.value }))} />
+                {(() => {
+                  const avg = avgMilesPerDay();
+                  const lead = Number(reminderForm.reminder_miles) || 500;
+                  if (!avg) return <p className="text-slate-500 text-xs mt-1">Add fuel entries to see time estimates.</p>;
+                  const days = Math.round(lead / avg);
+                  return <p className="text-teal-400 text-xs mt-1">≈ {days} days before due at current driving pace</p>;
+                })()}
+              </div>
+
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
                   {saving ? 'Saving...' : 'Add Reminder'}

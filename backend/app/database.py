@@ -26,3 +26,18 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def run_migrations():
+    from sqlalchemy import text
+    new_columns = [
+        "ALTER TABLE maintenance_reminders ADD COLUMN target_mileage FLOAT",
+        "ALTER TABLE maintenance_reminders ADD COLUMN reminder_miles INTEGER",
+    ]
+    with engine.connect() as conn:
+        for stmt in new_columns:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                conn.rollback()

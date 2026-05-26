@@ -230,12 +230,16 @@ class MaintenanceReminderCreate(BaseModel):
     service_type: str
     interval_miles: Optional[float] = None
     interval_days: Optional[int] = None
+    target_mileage: Optional[float] = None
+    reminder_miles: Optional[int] = None
 
 
 class MaintenanceReminderUpdate(BaseModel):
     service_type: Optional[str] = None
     interval_miles: Optional[float] = None
     interval_days: Optional[int] = None
+    target_mileage: Optional[float] = None
+    reminder_miles: Optional[int] = None
     last_performed_mileage: Optional[float] = None
     last_performed_date: Optional[date] = None
 
@@ -246,6 +250,8 @@ class MaintenanceReminderResponse(BaseModel):
     service_type: str
     interval_miles: Optional[float]
     interval_days: Optional[int]
+    target_mileage: Optional[float]
+    reminder_miles: Optional[int]
     last_performed_mileage: Optional[float]
     last_performed_date: Optional[date]
     next_due_mileage: Optional[float]

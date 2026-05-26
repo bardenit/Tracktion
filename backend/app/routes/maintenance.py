@@ -240,6 +240,9 @@ def create_maintenance_reminder(
         service_type=reminder_data.service_type,
         interval_miles=reminder_data.interval_miles,
         interval_days=reminder_data.interval_days,
+        target_mileage=reminder_data.target_mileage,
+        reminder_miles=reminder_data.reminder_miles,
+        next_due_mileage=reminder_data.target_mileage,  # absolute target sets due directly
     )
     
     db.add(reminder)

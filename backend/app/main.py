@@ -3,12 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.database import engine, Base
+from app.database import engine, Base, run_migrations
 from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips, ocr
 from app.routes import settings as settings_router
 
-# Create tables on startup
+# Create tables and run migrations on startup
 Base.metadata.create_all(bind=engine)
+run_migrations()
 
 
 @asynccontextmanager
