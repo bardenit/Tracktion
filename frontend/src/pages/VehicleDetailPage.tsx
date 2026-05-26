@@ -819,7 +819,7 @@ export default function VehicleDetailPage() {
                 <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <label className={`btn-secondary text-xs cursor-pointer px-2 py-1 ${photoUploading ? 'opacity-50' : ''}`}>
                     {photoUploading ? 'Uploading…' : 'Replace'}
-                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                    <input type="file" accept="image/*" className="hidden"
                       onChange={handlePhotoUpload} disabled={photoUploading} />
                   </label>
                   <button onClick={handleDeletePhoto}
@@ -834,7 +834,7 @@ export default function VehicleDetailPage() {
               }`}>
                 <span className="text-slate-400 text-sm">{photoUploading ? 'Uploading…' : '📷  Add a photo'}</span>
                 <span className="text-slate-500 text-xs mt-1">Click to browse or use your camera</span>
-                <input type="file" accept="image/*" capture="environment" className="hidden"
+                <input type="file" accept="image/*" className="hidden"
                   onChange={handlePhotoUpload} disabled={photoUploading} />
               </label>
             )}
