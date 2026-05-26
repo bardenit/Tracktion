@@ -593,6 +593,28 @@ export default function VehicleDetailPage() {
     return { color: 'text-green-400', bg: 'bg-green-900/20', label: 'OK' };
   };
 
+  const startReminderNow = async (r: Reminder) => {
+    if (!vehicle) return;
+    const todayStr = today();
+    const update: Record<string, unknown> = {
+      last_performed_mileage: vehicle.current_mileage,
+      last_performed_date: todayStr,
+    };
+    if (r.interval_miles) update.next_due_mileage = vehicle.current_mileage + r.interval_miles;
+    if (r.interval_days) {
+      const d = new Date();
+      d.setDate(d.getDate() + r.interval_days);
+      update.next_due_date = d.toISOString().split('T')[0];
+    }
+    try {
+      await apiClient.updateMaintenanceReminder(id, r.id, update);
+      loadMaintenance().catch(console.error);
+      addToast('success', `${r.service_type} interval started from today`);
+    } catch {
+      addToast('error', 'Failed to update reminder');
+    }
+  };
+
   const handleGpsLocation = () => {
     if (!navigator.geolocation) { addToast('error', 'Geolocation not supported by this browser'); return; }
     setGpsLoading(true);
@@ -1149,7 +1171,13 @@ export default function VehicleDetailPage() {
                               {r.reminder_miles ? ` · alert at ${(r.next_due_mileage - r.reminder_miles).toLocaleString()} mi` : ''}
                             </p>
                           ) : !r.target_mileage && (
-                            <p className="text-slate-500 text-xs mt-0.5 italic">Log a service to start this interval</p>
+                            <button
+                              type="button"
+                              onClick={() => startReminderNow(r)}
+                              className="mt-1.5 text-xs text-teal-400 hover:text-teal-300 border border-teal-800 hover:border-teal-700 bg-teal-900/20 px-2 py-0.5 rounded transition-colors"
+                            >
+                              ▶ Start from now
+                            </button>
                           )}
                           {(() => {
                             const eta = reminderEta(r);

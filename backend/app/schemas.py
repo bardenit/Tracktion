@@ -242,6 +242,8 @@ class MaintenanceReminderUpdate(BaseModel):
     reminder_miles: Optional[int] = None
     last_performed_mileage: Optional[float] = None
     last_performed_date: Optional[date] = None
+    next_due_mileage: Optional[float] = None
+    next_due_date: Optional[date] = None
 
 
 class MaintenanceReminderResponse(BaseModel):
