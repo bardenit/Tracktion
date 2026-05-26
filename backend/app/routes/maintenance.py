@@ -235,6 +235,31 @@ def create_maintenance_reminder(
             detail=f"Reminder for {reminder_data.service_type} already exists",
         )
     
+    # Seed interval reminders from existing maintenance history
+    last_mileage = None
+    last_date = None
+    next_due_mileage = reminder_data.target_mileage  # for target mode
+    next_due_date = None
+
+    if reminder_data.interval_miles or reminder_data.interval_days:
+        last_entry = (
+            db.query(MaintenanceEntry)
+            .filter(
+                MaintenanceEntry.vehicle_id == vehicle_id,
+                MaintenanceEntry.type == reminder_data.service_type,
+            )
+            .order_by(MaintenanceEntry.mileage.desc())
+            .first()
+        )
+        if last_entry:
+            last_mileage = last_entry.mileage
+            last_date = last_entry.date
+            if reminder_data.interval_miles:
+                next_due_mileage = last_entry.mileage + reminder_data.interval_miles
+            if reminder_data.interval_days:
+                from datetime import timedelta
+                next_due_date = last_entry.date + timedelta(days=reminder_data.interval_days)
+
     reminder = MaintenanceReminder(
         vehicle_id=vehicle_id,
         service_type=reminder_data.service_type,
@@ -242,13 +267,16 @@ def create_maintenance_reminder(
         interval_days=reminder_data.interval_days,
         target_mileage=reminder_data.target_mileage,
         reminder_miles=reminder_data.reminder_miles,
-        next_due_mileage=reminder_data.target_mileage,  # absolute target sets due directly
+        last_performed_mileage=last_mileage,
+        last_performed_date=last_date,
+        next_due_mileage=next_due_mileage,
+        next_due_date=next_due_date,
     )
-    
+
     db.add(reminder)
     db.commit()
     db.refresh(reminder)
-    
+
     return reminder
 
 

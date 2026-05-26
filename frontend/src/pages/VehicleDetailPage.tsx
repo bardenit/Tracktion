@@ -564,6 +564,8 @@ export default function VehicleDetailPage() {
   const reminderStatus = (r: Reminder) => {
     const threshold = r.reminder_miles ?? 500;
     if (r.is_overdue) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
+    if (!r.next_due_mileage && !r.next_due_date && !r.target_mileage)
+      return { color: 'text-slate-400', bg: 'bg-slate-800/50', label: 'Pending' };
     if (r.next_due_mileage && vehicle) {
       const remaining = r.next_due_mileage - vehicle.current_mileage;
       if (remaining <= 0) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
@@ -1080,11 +1082,13 @@ export default function VehicleDetailPage() {
                                   r.interval_days ? `Every ${r.interval_days} days` : '',
                                 ].filter(Boolean).join(' · ')}
                           </p>
-                          {r.next_due_mileage && (
+                          {r.next_due_mileage ? (
                             <p className="text-slate-400 text-xs mt-0.5">
                               Due at {r.next_due_mileage.toLocaleString()} mi
                               {r.reminder_miles ? ` · alert at ${(r.next_due_mileage - r.reminder_miles).toLocaleString()} mi` : ''}
                             </p>
+                          ) : !r.target_mileage && (
+                            <p className="text-slate-500 text-xs mt-0.5 italic">Log a service to start this interval</p>
                           )}
                           {(() => {
                             const eta = reminderEta(r);
