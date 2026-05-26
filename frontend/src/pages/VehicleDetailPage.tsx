@@ -263,6 +263,12 @@ export default function VehicleDetailPage() {
   // Form state
   const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '' });
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
+    JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
+  );
+  const [customTypesOpen, setCustomTypesOpen] = useState(false);
+  const [newTypeInput, setNewTypeInput] = useState('');
+  const [maintOther, setMaintOther] = useState('');
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
   const [reminderTrigger, setReminderTrigger] = useState<'interval' | 'target'>('interval');
   const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
@@ -408,13 +414,18 @@ export default function VehicleDetailPage() {
   const openMaintAdd = () => {
     setEditMaint(null);
     setMaintForm({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
+    setMaintOther('');
+    setCustomTypesOpen(false);
     setFormError('');
     setMaintModal(true);
   };
 
   const openMaintEdit = (e: MaintenanceEntry) => {
     setEditMaint(e);
-    setMaintForm({ date: e.date, mileage: e.mileage, type: e.type, cost: e.cost, service_provider: e.service_provider || '', notes: e.notes || '' });
+    const knownType = [...BASE_TYPES, ...customServiceTypes].includes(e.type) ? e.type : 'Other';
+    setMaintForm({ date: e.date, mileage: e.mileage, type: knownType, cost: e.cost, service_provider: e.service_provider || '', notes: e.notes || '' });
+    setMaintOther(knownType === 'Other' ? e.type : '');
+    setCustomTypesOpen(false);
     setFormError('');
     setMaintModal(true);
   };
@@ -424,10 +435,11 @@ export default function VehicleDetailPage() {
     setSaving(true);
     setFormError('');
     try {
+      const serviceType = maintForm.type === 'Other' ? (maintOther.trim() || 'Other') : maintForm.type;
       const payload = {
         date: maintForm.date,
         mileage: Number(maintForm.mileage),
-        type: maintForm.type,
+        type: serviceType,
         cost: Number(maintForm.cost),
         service_provider: maintForm.service_provider || undefined,
         notes: maintForm.notes || undefined,
@@ -612,7 +624,27 @@ export default function VehicleDetailPage() {
 
   const isTrailer = vehicle.vehicle_type === 'trailer';
 
-  const SERVICE_TYPES = isTrailer ? TRAILER_SERVICE_TYPES : VEHICLE_SERVICE_TYPES;
+  const BASE_TYPES = isTrailer ? TRAILER_SERVICE_TYPES : VEHICLE_SERVICE_TYPES;
+  const SERVICE_TYPES = [
+    ...BASE_TYPES.filter((t) => t !== 'Other'),
+    ...customServiceTypes.filter((t) => !BASE_TYPES.includes(t)),
+    'Other',
+  ];
+
+  const addCustomType = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || SERVICE_TYPES.includes(trimmed)) return;
+    const updated = [...customServiceTypes, trimmed];
+    setCustomServiceTypes(updated);
+    localStorage.setItem('customServiceTypes', JSON.stringify(updated));
+    setNewTypeInput('');
+  };
+
+  const removeCustomType = (name: string) => {
+    const updated = customServiceTypes.filter((t) => t !== name);
+    setCustomServiceTypes(updated);
+    localStorage.setItem('customServiceTypes', JSON.stringify(updated));
+  };
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'summary', label: 'Summary' },
@@ -1192,11 +1224,42 @@ export default function VehicleDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Service Type *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-slate-300">Service Type *</label>
+                  <button type="button" onClick={() => setCustomTypesOpen((o) => !o)}
+                    className="text-xs text-slate-400 hover:text-teal-400 transition-colors">
+                    {customTypesOpen ? 'Done' : '✎ Edit list'}
+                  </button>
+                </div>
                 <select className="input-field" value={maintForm.type}
-                  onChange={(e) => setMaintForm((p) => ({ ...p, type: e.target.value }))}>
+                  onChange={(e) => { setMaintForm((p) => ({ ...p, type: e.target.value })); setMaintOther(''); }}>
                   {SERVICE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
+                {maintForm.type === 'Other' && (
+                  <input className="input-field mt-2" placeholder="Describe the service (e.g. Differential Flush)"
+                    value={maintOther} onChange={(e) => setMaintOther(e.target.value)} autoFocus />
+                )}
+                {customTypesOpen && (
+                  <div className="mt-2 p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                    {customServiceTypes.length === 0 && (
+                      <p className="text-slate-500 text-xs">No custom types yet.</p>
+                    )}
+                    {customServiceTypes.map((t) => (
+                      <div key={t} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-300">{t}</span>
+                        <button type="button" onClick={() => removeCustomType(t)}
+                          className="text-slate-500 hover:text-red-400 text-base leading-none transition-colors">×</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <input className="input-field flex-1 text-sm py-1" placeholder="Add type..."
+                        value={newTypeInput} onChange={(e) => setNewTypeInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomType(newTypeInput); } }} />
+                      <button type="button" onClick={() => addCustomType(newTypeInput)}
+                        className="btn-secondary text-sm px-3 py-1">Add</button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1211,9 +1274,12 @@ export default function VehicleDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Notes</label>
-                <textarea className="input-field" rows={2} value={maintForm.notes}
-                  onChange={(e) => setMaintForm((p) => ({ ...p, notes: e.target.value }))} />
+                <label className="block text-sm text-slate-300 mb-1">
+                  Notes{maintForm.type === 'Other' && !maintOther.trim() ? ' *' : ''}
+                </label>
+                <textarea className="input-field" rows={maintForm.type === 'Other' ? 3 : 2} value={maintForm.notes}
+                  onChange={(e) => setMaintForm((p) => ({ ...p, notes: e.target.value }))}
+                  placeholder={maintForm.type === 'Other' ? 'Any additional details about the service...' : ''} />
               </div>
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
