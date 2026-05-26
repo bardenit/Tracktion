@@ -760,26 +760,57 @@ export default function VehicleDetailPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <button
-          onClick={() => navigate('/vehicles')}
-          className="text-slate-400 hover:text-white text-sm mb-2 transition-colors block"
-        >
-          ← All Vehicles
-        </button>
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-white">
-            {vehicle.nickname || `${vehicle.year} ${vehicle.make} ${vehicle.model}`}
-          </h1>
-          {isTrailer && (
-            <span className="text-xs bg-amber-900/50 text-amber-300 border border-amber-700 px-2 py-0.5 rounded">Trailer</span>
+      <div className="flex items-start gap-6">
+        <div className="flex-1 min-w-0">
+          <button
+            onClick={() => navigate('/vehicles')}
+            className="text-slate-400 hover:text-white text-sm mb-2 transition-colors block"
+          >
+            ← All Vehicles
+          </button>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-white">
+              {vehicle.nickname || `${vehicle.year} ${vehicle.make} ${vehicle.model}`}
+            </h1>
+            {isTrailer && (
+              <span className="text-xs bg-amber-900/50 text-amber-300 border border-amber-700 px-2 py-0.5 rounded">Trailer</span>
+            )}
+          </div>
+          {vehicle.nickname && (
+            <p className="text-slate-400 text-sm">{vehicle.year} {vehicle.make} {vehicle.model}</p>
+          )}
+          {vehicle.vin && (
+            <p className="text-slate-400 text-sm mt-1 font-mono">VIN: {vehicle.vin}</p>
           )}
         </div>
-        {vehicle.nickname && (
-          <p className="text-slate-400 text-sm">{vehicle.year} {vehicle.make} {vehicle.model}</p>
-        )}
-        {vehicle.vin && (
-          <p className="text-slate-400 text-sm mt-1 font-mono">VIN: {vehicle.vin}</p>
+        {photoUrl ? (
+          <div className="relative group flex-shrink-0 max-w-xs rounded-lg overflow-hidden">
+            <img
+              src={photoUrl}
+              alt={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
+              className="w-full h-auto"
+            />
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+            <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <label className={`btn-secondary text-xs cursor-pointer px-2 py-1 ${photoUploading ? 'opacity-50' : ''}`}>
+                {photoUploading ? 'Uploading…' : 'Replace'}
+                <input type="file" accept="image/*" className="hidden"
+                  onChange={handlePhotoUpload} disabled={photoUploading} />
+              </label>
+              <button onClick={handleDeletePhoto}
+                className="bg-red-900/80 hover:bg-red-800 text-red-200 text-xs px-2 py-1 rounded transition-colors">
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <label className={`flex-shrink-0 flex flex-col items-center justify-center w-40 h-24 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+            photoUploading ? 'border-teal-600 opacity-50' : 'border-slate-600 hover:border-teal-600'
+          }`}>
+            <span className="text-slate-400 text-xs">{photoUploading ? 'Uploading…' : '📷 Add photo'}</span>
+            <input type="file" accept="image/*" className="hidden"
+              onChange={handlePhotoUpload} disabled={photoUploading} />
+          </label>
         )}
       </div>
 
@@ -805,40 +836,6 @@ export default function VehicleDetailPage() {
       {/* ── SUMMARY ─────────────────────────────────────────────────────────── */}
       {activeTab === 'summary' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-          {/* Vehicle photo */}
-          <div className="sm:col-span-2 card p-0 overflow-hidden">
-            {photoUrl ? (
-              <div className="relative group">
-                <img
-                  src={photoUrl}
-                  alt={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
-                  className="w-full max-h-72 object-cover"
-                />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
-                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <label className={`btn-secondary text-xs cursor-pointer px-2 py-1 ${photoUploading ? 'opacity-50' : ''}`}>
-                    {photoUploading ? 'Uploading…' : 'Replace'}
-                    <input type="file" accept="image/*" className="hidden"
-                      onChange={handlePhotoUpload} disabled={photoUploading} />
-                  </label>
-                  <button onClick={handleDeletePhoto}
-                    className="bg-red-900/80 hover:bg-red-800 text-red-200 text-xs px-2 py-1 rounded transition-colors">
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <label className={`flex flex-col items-center justify-center h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors m-4 ${
-                photoUploading ? 'border-teal-600 opacity-50' : 'border-slate-600 hover:border-teal-600'
-              }`}>
-                <span className="text-slate-400 text-sm">{photoUploading ? 'Uploading…' : '📷  Add a photo'}</span>
-                <span className="text-slate-500 text-xs mt-1">Click to browse or use your camera</span>
-                <input type="file" accept="image/*" className="hidden"
-                  onChange={handlePhotoUpload} disabled={photoUploading} />
-              </label>
-            )}
-          </div>
 
           <div className="card space-y-3">
             <h2 className="font-semibold text-white">Vehicle Info</h2>
