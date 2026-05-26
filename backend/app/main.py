@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.database import engine, Base
-from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips
+from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips, ocr
 from app.routes import settings as settings_router
 
 # Create tables on startup
@@ -46,6 +46,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["documents"]
 app.include_router(parts.router, prefix="/api/parts", tags=["parts"])
 app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+app.include_router(ocr.router, prefix="/api/ocr", tags=["ocr"])
 
 
 @app.get("/")

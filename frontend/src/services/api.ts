@@ -199,6 +199,11 @@ class ApiClient {
     return response.data;
   }
 
+  async getDbStatus() {
+    const response = await this.client.get('/settings/db/status');
+    return response.data;
+  }
+
   async getDbSettings() {
     const response = await this.client.get('/settings/db');
     return response.data;
@@ -211,6 +216,54 @@ class ApiClient {
 
   async saveDbSettings(settings: any) {
     const response = await this.client.post('/settings/db', settings);
+    return response.data;
+  }
+
+  async getStorageSettings() {
+    const response = await this.client.get('/settings/storage');
+    return response.data;
+  }
+
+  async testStorageConnection(settings: any) {
+    const response = await this.client.post('/settings/storage/test', settings);
+    return response.data;
+  }
+
+  async saveStorageSettings(settings: any) {
+    const response = await this.client.post('/settings/storage', settings);
+    return response.data;
+  }
+
+  async getIntegrationsSettings() {
+    const response = await this.client.get('/settings/integrations');
+    return response.data;
+  }
+
+  async testIntegrationsSettings() {
+    const response = await this.client.post('/settings/integrations/test');
+    return response.data;
+  }
+
+  async saveIntegrationsSettings(settings: any) {
+    const response = await this.client.post('/settings/integrations', settings);
+    return response.data;
+  }
+
+  async ocrFuel(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.client.post('/ocr/fuel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
+  async ocrExpense(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.client.post('/ocr/expense', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return response.data;
   }
 

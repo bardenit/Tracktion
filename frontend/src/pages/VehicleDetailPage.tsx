@@ -121,6 +121,32 @@ function FormError({ msg }: { msg: string }) {
   );
 }
 
+function ScanReceiptButton({ onScan }: { onScan: (file: File) => Promise<void> }) {
+  const [scanning, setScanning] = React.useState(false);
+  const ref = React.useRef<HTMLInputElement>(null);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanning(true);
+    try { await onScan(file); } finally { setScanning(false); if (ref.current) ref.current.value = ''; }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <button type="button" onClick={() => ref.current?.click()} disabled={scanning}
+        className="flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300 border border-teal-800 hover:border-teal-700 bg-teal-900/20 px-3 py-1.5 rounded transition-colors disabled:opacity-50">
+        {scanning ? (
+          <><span className="animate-spin inline-block">⟳</span> Scanning...</>
+        ) : (
+          <>📷 Scan Receipt</>
+        )}
+      </button>
+      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
 function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(vehicle.current_mileage));
@@ -886,7 +912,23 @@ export default function VehicleDetailPage() {
 
           <Modal isOpen={fuelModal} onClose={() => setFuelModal(false)} title={editFuel ? 'Edit Fuel Entry' : 'Log Fill-up'}>
             <form onSubmit={saveFuel} className="space-y-4">
-              <FormError msg={formError} />
+              <div className="flex items-center justify-between">
+                <FormError msg={formError} />
+                <ScanReceiptButton onScan={async (file) => {
+                  setFormError('');
+                  try {
+                    const r = await apiClient.ocrFuel(file);
+                    if (r.date) setFuelForm((p) => ({ ...p, date: r.date }));
+                    if (r.gallons != null) setFuelForm((p) => ({ ...p, gallons: r.gallons }));
+                    if (r.cost != null) setFuelForm((p) => ({ ...p, cost: r.cost }));
+                    if (r.location) setFuelForm((p) => ({ ...p, location: r.location }));
+                    if (r.mileage != null) setFuelForm((p) => ({ ...p, mileage: r.mileage }));
+                    addToast('success', 'Receipt scanned — review and save');
+                  } catch (err: any) {
+                    setFormError(err.response?.data?.detail || 'Scan failed');
+                  }
+                }} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Date *</label>
@@ -1205,7 +1247,22 @@ export default function VehicleDetailPage() {
 
           <Modal isOpen={expenseModal} onClose={() => setExpenseModal(false)} title="Add Expense">
             <form onSubmit={saveExpense} className="space-y-4">
-              <FormError msg={formError} />
+              <div className="flex items-center justify-between">
+                <FormError msg={formError} />
+                <ScanReceiptButton onScan={async (file) => {
+                  setFormError('');
+                  try {
+                    const r = await apiClient.ocrExpense(file);
+                    if (r.date) setExpenseForm((p) => ({ ...p, date: r.date }));
+                    if (r.amount != null) setExpenseForm((p) => ({ ...p, amount: r.amount }));
+                    if (r.description) setExpenseForm((p) => ({ ...p, description: r.description }));
+                    if (r.category) setExpenseForm((p) => ({ ...p, category: r.category }));
+                    addToast('success', 'Receipt scanned — review and save');
+                  } catch (err: any) {
+                    setFormError(err.response?.data?.detail || 'Scan failed');
+                  }
+                }} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Category *</label>

@@ -348,3 +348,39 @@ class DBSettingsResponse(BaseModel):
     port: Optional[int] = None
     database: Optional[str] = None
     username: Optional[str] = None
+
+
+class StorageSettings(BaseModel):
+    type: str = "local"          # local | s3 | webdav
+    # S3-compatible fields
+    endpoint: Optional[str] = None
+    bucket: Optional[str] = None
+    region: Optional[str] = None
+    access_key: Optional[str] = None
+    secret_key: Optional[str] = None  # write-only
+    # WebDAV fields
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None   # write-only
+    path: Optional[str] = None
+
+
+class StorageSettingsResponse(BaseModel):
+    type: str
+    endpoint: Optional[str] = None
+    bucket: Optional[str] = None
+    region: Optional[str] = None
+    access_key: Optional[str] = None
+    url: Optional[str] = None
+    username: Optional[str] = None
+    path: Optional[str] = None
+    has_secret: bool = False
+
+
+class IntegrationsSettings(BaseModel):
+    anthropic_api_key: Optional[str] = None
+
+
+class IntegrationsSettingsResponse(BaseModel):
+    anthropic_api_key_set: bool
+    anthropic_api_key_preview: Optional[str] = None

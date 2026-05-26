@@ -2,11 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import create_engine, text
 from app.auth import get_current_user
 from app.models import User
-from app.data_config import get_config, save_config
-from app.schemas import DBSettings, DBSettingsResponse
+from app.data_config import get_config, save_config, get_database_url
+from app.schemas import (
+    DBSettings, DBSettingsResponse,
+    StorageSettings, StorageSettingsResponse,
+    IntegrationsSettings, IntegrationsSettingsResponse,
+)
 
 router = APIRouter()
 
+
+# ── Database ──────────────────────────────────────────────────────────────────
 
 def build_db_url(s: DBSettings) -> str:
     if s.type == "sqlite":
@@ -19,10 +25,31 @@ def build_db_url(s: DBSettings) -> str:
     raise HTTPException(status_code=400, detail=f"Unsupported database type: {s.type}")
 
 
+@router.get("/db/status")
+def get_db_status(current_user: User = Depends(get_current_user)):
+    url = get_database_url()
+    if url.startswith("sqlite"):
+        return {"type": "sqlite", "display": f"SQLite — {url.replace('sqlite:///', '')}"}
+    if "postgresql" in url or "postgres" in url:
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(url)
+            return {"type": "postgresql", "display": f"PostgreSQL — {p.hostname}:{p.port or 5432}/{p.path.lstrip('/')}"}
+        except Exception:
+            return {"type": "postgresql", "display": "PostgreSQL"}
+    if "mysql" in url:
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(url)
+            return {"type": "mysql", "display": f"MySQL — {p.hostname}:{p.port or 3306}/{p.path.lstrip('/')}"}
+        except Exception:
+            return {"type": "mysql", "display": "MySQL"}
+    return {"type": "unknown", "display": "Unknown"}
+
+
 @router.get("/db", response_model=DBSettingsResponse)
 def get_db_settings(current_user: User = Depends(get_current_user)):
-    config = get_config()
-    db_cfg = config.get("database", {})
+    db_cfg = get_config().get("database", {})
     return DBSettingsResponse(
         type=db_cfg.get("type", "sqlite"),
         host=db_cfg.get("host"),
@@ -37,10 +64,10 @@ def test_db_connection(s: DBSettings, current_user: User = Depends(get_current_u
     try:
         url = build_db_url(s)
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        test_engine = create_engine(url, connect_args=connect_args)
-        with test_engine.connect() as conn:
+        engine = create_engine(url, connect_args=connect_args)
+        with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        test_engine.dispose()
+        engine.dispose()
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -49,24 +76,123 @@ def test_db_connection(s: DBSettings, current_user: User = Depends(get_current_u
 @router.post("/db")
 def save_db_settings(s: DBSettings, current_user: User = Depends(get_current_user)):
     url = build_db_url(s)
-    # Test before saving
     try:
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        test_engine = create_engine(url, connect_args=connect_args)
-        with test_engine.connect() as conn:
+        engine = create_engine(url, connect_args=connect_args)
+        with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        test_engine.dispose()
+        engine.dispose()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Connection failed: {e}")
-
     config = get_config()
-    config["database"] = {
-        "type": s.type,
-        "url": url,
-        "host": s.host,
-        "port": s.port,
-        "database": s.database,
-        "username": s.username,
-    }
+    config["database"] = {"type": s.type, "url": url, "host": s.host, "port": s.port, "database": s.database, "username": s.username}
     save_config(config)
     return {"message": "Database settings saved. Restart the container to apply.", "restart_required": True}
+
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+
+@router.get("/storage", response_model=StorageSettingsResponse)
+def get_storage_settings(current_user: User = Depends(get_current_user)):
+    cfg = get_config().get("storage", {})
+    return StorageSettingsResponse(
+        type=cfg.get("type", "local"),
+        endpoint=cfg.get("endpoint"),
+        bucket=cfg.get("bucket"),
+        region=cfg.get("region"),
+        access_key=cfg.get("access_key"),
+        url=cfg.get("url"),
+        username=cfg.get("username"),
+        path=cfg.get("path"),
+        has_secret=bool(cfg.get("secret_key") or cfg.get("password")),
+    )
+
+
+@router.post("/storage/test")
+def test_storage_connection(s: StorageSettings, current_user: User = Depends(get_current_user)):
+    try:
+        _build_storage(s).test()
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/storage")
+def save_storage_settings(s: StorageSettings, current_user: User = Depends(get_current_user)):
+    if s.type != "local":
+        try:
+            _build_storage(s).test()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Connection test failed: {e}")
+
+    config = get_config()
+    existing = config.get("storage", {})
+
+    entry: dict = {"type": s.type}
+    if s.type == "s3":
+        entry["endpoint"] = s.endpoint or ""
+        entry["bucket"] = s.bucket or ""
+        entry["region"] = s.region or "us-east-1"
+        entry["access_key"] = s.access_key or ""
+        entry["secret_key"] = s.secret_key or existing.get("secret_key", "")
+    elif s.type == "webdav":
+        entry["url"] = s.url or ""
+        entry["username"] = s.username or ""
+        entry["password"] = s.password or existing.get("password", "")
+        entry["path"] = s.path or "/tracktion"
+
+    config["storage"] = entry
+    save_config(config)
+    return {"message": "Storage settings saved. New uploads will use the updated backend immediately."}
+
+
+def _build_storage(s: StorageSettings):
+    from app.storage import LocalStorage, S3Storage, WebDAVStorage
+    if s.type == "s3":
+        return S3Storage({
+            "endpoint": s.endpoint, "bucket": s.bucket, "region": s.region,
+            "access_key": s.access_key, "secret_key": s.secret_key,
+        })
+    if s.type == "webdav":
+        return WebDAVStorage({"url": s.url, "username": s.username, "password": s.password, "path": s.path})
+    return LocalStorage()
+
+
+# ── Integrations ──────────────────────────────────────────────────────────────
+
+@router.get("/integrations", response_model=IntegrationsSettingsResponse)
+def get_integrations_settings(current_user: User = Depends(get_current_user)):
+    key = get_config().get("integrations", {}).get("anthropic_api_key", "")
+    return IntegrationsSettingsResponse(
+        anthropic_api_key_set=bool(key),
+        anthropic_api_key_preview=f"...{key[-4:]}" if key else None,
+    )
+
+
+@router.post("/integrations/test")
+def test_integrations(current_user: User = Depends(get_current_user)):
+    key = get_config().get("integrations", {}).get("anthropic_api_key", "")
+    if not key:
+        return {"success": False, "error": "No API key configured"}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=key)
+        client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Hi"}],
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/integrations")
+def save_integrations_settings(s: IntegrationsSettings, current_user: User = Depends(get_current_user)):
+    config = get_config()
+    existing_key = config.get("integrations", {}).get("anthropic_api_key", "")
+    config["integrations"] = {
+        "anthropic_api_key": s.anthropic_api_key or existing_key,
+    }
+    save_config(config)
+    return {"message": "Integration settings saved."}
