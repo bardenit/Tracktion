@@ -254,8 +254,8 @@ class ApiClient {
     return response.data;
   }
 
-  async testIntegrationsSettings() {
-    const response = await this.client.post('/settings/integrations/test');
+  async testIntegrationsSettings(key?: string) {
+    const response = await this.client.post('/settings/integrations/test', key ? { anthropic_api_key: key } : {});
     return response.data;
   }
 

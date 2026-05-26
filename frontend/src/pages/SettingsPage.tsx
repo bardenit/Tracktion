@@ -204,7 +204,7 @@ export default function SettingsPage() {
   const handleTestIntegrations = async () => {
     setIntLoading(true); setIntStatus(null);
     try {
-      const r = await apiClient.testIntegrationsSettings();
+      const r = await apiClient.testIntegrationsSettings(anthropicKey || undefined);
       setIntStatus(r.success ? { type: 'success', msg: 'API key is valid!' } : { type: 'error', msg: r.error || 'Invalid API key' });
     } catch { setIntStatus({ type: 'error', msg: 'Test request failed' }); }
     finally { setIntLoading(false); }
@@ -597,7 +597,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex gap-3">
-            <button onClick={handleTestIntegrations} disabled={intLoading || !anthropicKeySet} className="btn-secondary flex-1">
+            <button onClick={handleTestIntegrations} disabled={intLoading || (!anthropicKey && !anthropicKeySet)} className="btn-secondary flex-1">
               {intLoading ? 'Testing...' : 'Test Key'}
             </button>
             <button onClick={handleSaveIntegrations} disabled={intLoading || !anthropicKey} className="btn-primary flex-1">

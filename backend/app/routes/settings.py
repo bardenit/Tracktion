@@ -193,8 +193,8 @@ def get_integrations_settings(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/integrations/test")
-def test_integrations(current_user: User = Depends(get_current_user)):
-    key = get_config().get("integrations", {}).get("anthropic_api_key", "")
+def test_integrations(s: IntegrationsSettings = IntegrationsSettings(), current_user: User = Depends(get_current_user)):
+    key = s.anthropic_api_key or get_config().get("integrations", {}).get("anthropic_api_key", "")
     if not key:
         return {"success": False, "error": "No API key configured"}
     try:
