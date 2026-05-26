@@ -4,7 +4,6 @@ import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
 import AnalyticsTab from '../components/AnalyticsTab';
-import VehicleSilhouette, { CAR_COLORS, DEFAULT_COLOR } from '../components/VehicleSilhouette';
 
 type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics';
 
@@ -501,13 +500,6 @@ export default function VehicleDetailPage() {
     addToast('success', 'Reminder deleted');
   };
 
-  const saveVehicleColor = async (hex: string) => {
-    const updated = await apiClient.updateVehicle(Number(id), {
-      specs_overrides: { ...(vehicle?.specs_overrides || {}), color: hex },
-    });
-    setVehicle(updated);
-  };
-
   // ─── Expense handlers ────────────────────────────────────────────────────────
 
   const openExpenseAdd = () => {
@@ -767,30 +759,6 @@ export default function VehicleDetailPage() {
       {/* ── SUMMARY ─────────────────────────────────────────────────────────── */}
       {activeTab === 'summary' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Silhouette + color picker */}
-          <div className="sm:col-span-2 card flex flex-col items-center gap-4 py-6">
-            <VehicleSilhouette
-              bodyClass={effectiveSpecs.body_class as string | undefined}
-              vehicleType={vehicle.vehicle_type}
-              color={(vehicle.specs_overrides?.color as string) || DEFAULT_COLOR}
-              className="w-full max-w-sm h-24"
-            />
-            <div className="flex items-center gap-2 flex-wrap justify-center">
-              {CAR_COLORS.map((c) => (
-                <button
-                  key={c.hex}
-                  title={c.name}
-                  onClick={() => saveVehicleColor(c.hex)}
-                  className={`w-7 h-7 rounded-full border-2 transition-all ${
-                    ((vehicle.specs_overrides?.color as string) || DEFAULT_COLOR) === c.hex
-                      ? 'border-teal-400 scale-110 shadow-lg'
-                      : 'border-slate-600 hover:border-slate-400'
-                  }`}
-                  style={{ backgroundColor: c.hex }}
-                />
-              ))}
-            </div>
-          </div>
           <div className="card space-y-3">
             <h2 className="font-semibold text-white">Vehicle Info</h2>
             {(

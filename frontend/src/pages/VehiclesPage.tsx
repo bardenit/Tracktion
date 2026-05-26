@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
-import VehicleSilhouette, { DEFAULT_COLOR } from '../components/VehicleSilhouette';
 
 interface Vehicle {
   id: number;
@@ -208,14 +207,7 @@ export default function VehiclesPage() {
                     {v.vehicle_type === 'trailer' && v.axle_count && <span>{v.axle_count}-axle</span>}
                   </div>
                 </div>
-                <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                  <VehicleSilhouette
-                    bodyClass={v.nhtsa_data?.body_class as string | undefined}
-                    vehicleType={v.vehicle_type}
-                    color={(v.specs_overrides?.color as string) || DEFAULT_COLOR}
-                    className="w-36 h-12 opacity-90"
-                  />
-                  <div className="flex gap-2">
+                <div className="flex gap-2 flex-shrink-0">
                   <button
                     onClick={() => navigate(`/vehicles/${v.id}`)}
                     className="btn-secondary text-sm py-1.5 px-3"
@@ -234,7 +226,6 @@ export default function VehiclesPage() {
                   >
                     Delete
                   </button>
-                  </div>
                 </div>
               </div>
             </div>
