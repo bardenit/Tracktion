@@ -260,6 +260,7 @@ export default function VehicleDetailPage() {
 
   // Form state
   const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '' });
+  const [gpsLoading, setGpsLoading] = useState(false);
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
   const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '' });
   const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '' });
@@ -543,6 +544,36 @@ export default function VehicleDetailPage() {
         return { color: 'text-amber-400', bg: 'bg-amber-900/30', label: `${remaining.toLocaleString()} mi` };
     }
     return { color: 'text-green-400', bg: 'bg-green-900/20', label: 'OK' };
+  };
+
+  const handleGpsLocation = () => {
+    if (!navigator.geolocation) { addToast('error', 'Geolocation not supported by this browser'); return; }
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          const query = `[out:json];node["amenity"="fuel"](around:500,${coords.latitude},${coords.longitude});out body;`;
+          const res = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            body: query,
+          });
+          const data = await res.json();
+          if (!data.elements?.length) { addToast('info', 'No gas stations found nearby'); return; }
+          const nearest = data.elements.reduce((a: any, b: any) => {
+            const dist = (n: any) => Math.hypot(n.lat - coords.latitude, n.lon - coords.longitude);
+            return dist(a) <= dist(b) ? a : b;
+          });
+          const name = nearest.tags?.name || nearest.tags?.brand || nearest.tags?.operator || 'Gas Station';
+          setFuelForm((p) => ({ ...p, location: name }));
+        } catch {
+          addToast('error', 'Could not fetch nearby stations');
+        } finally {
+          setGpsLoading(false);
+        }
+      },
+      () => { addToast('error', 'Location access denied'); setGpsLoading(false); },
+      { timeout: 10000 }
+    );
   };
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -954,7 +985,15 @@ export default function VehicleDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Location</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-slate-300">Location</label>
+                  <button type="button" onClick={handleGpsLocation} disabled={gpsLoading}
+                    className="flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 disabled:opacity-50 transition-colors">
+                    {gpsLoading
+                      ? <><span className="animate-spin">⟳</span> Locating...</>
+                      : <><span>📍</span> Use my location</>}
+                  </button>
+                </div>
                 <input className="input-field" placeholder="e.g. Meijer, Shell" value={fuelForm.location}
                   onChange={(e) => setFuelForm((p) => ({ ...p, location: e.target.value }))} />
               </div>
