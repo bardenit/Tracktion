@@ -2,7 +2,13 @@ import axios, { AxiosInstance } from 'axios';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
 
-function resizeImageForUpload(file: File, maxDim = 1920, quality = 0.85): Promise<File> {
+function resizeImageForUpload(
+  file: File,
+  maxDim: number,
+  quality: number,
+  filename: string,
+): Promise<File> {
+  if (!file.type.startsWith('image/')) return Promise.resolve(file);
   return new Promise((resolve, reject) => {
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
@@ -17,13 +23,13 @@ function resizeImageForUpload(file: File, maxDim = 1920, quality = 0.85): Promis
       canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
       canvas.toBlob(
         (blob) => blob
-          ? resolve(new File([blob], 'photo.jpg', { type: 'image/jpeg' }))
+          ? resolve(new File([blob], filename, { type: 'image/jpeg' }))
           : reject(new Error('Canvas resize failed')),
         'image/jpeg',
         quality,
       );
     };
-    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); }; // fall back to original
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
     img.src = objectUrl;
   });
 }
@@ -291,8 +297,9 @@ class ApiClient {
   }
 
   async ocrFuel(file: File) {
+    const resized = await resizeImageForUpload(file, 1024, 0.70, 'receipt.jpg');
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', resized);
     const response = await this.client.post('/ocr/fuel', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -300,8 +307,9 @@ class ApiClient {
   }
 
   async ocrExpense(file: File) {
+    const resized = await resizeImageForUpload(file, 1024, 0.70, 'receipt.jpg');
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', resized);
     const response = await this.client.post('/ocr/expense', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -413,8 +421,9 @@ class ApiClient {
 
   // Document endpoints
   async uploadDocument(vehicleId: number, file: File, documentType: string) {
+    const resized = await resizeImageForUpload(file, 1500, 0.78, 'document.jpg');
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', resized);
     formData.append('document_type', documentType);
 
     const response = await this.client.post(`/documents/${vehicleId}/documents`, formData, {
@@ -445,7 +454,7 @@ class ApiClient {
   }
 
   async uploadVehiclePhoto(vehicleId: number, file: File): Promise<void> {
-    const resized = await resizeImageForUpload(file);
+    const resized = await resizeImageForUpload(file, 1200, 0.80, 'photo.jpg');
     const form = new FormData();
     form.append('file', resized);
     await this.client.post(`/documents/${vehicleId}/photo`, form, {
