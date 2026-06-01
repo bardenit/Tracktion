@@ -185,10 +185,16 @@ def _build_storage(s: StorageSettings):
 
 @router.get("/integrations", response_model=IntegrationsSettingsResponse)
 def get_integrations_settings(current_user: User = Depends(get_current_user)):
-    key = get_config().get("integrations", {}).get("anthropic_api_key", "")
+    cfg = get_config().get("integrations", {})
+    key = cfg.get("anthropic_api_key", "")
+    client_id = cfg.get("smartcar_client_id", "")
+    client_secret = cfg.get("smartcar_client_secret", "")
     return IntegrationsSettingsResponse(
         anthropic_api_key_set=bool(key),
         anthropic_api_key_preview=f"...{key[-4:]}" if key else None,
+        smartcar_client_id_set=bool(client_id),
+        smartcar_client_id=client_id or None,
+        smartcar_client_secret_set=bool(client_secret),
     )
 
 
@@ -213,9 +219,11 @@ def test_integrations(s: IntegrationsSettings = IntegrationsSettings(), current_
 @router.post("/integrations")
 def save_integrations_settings(s: IntegrationsSettings, current_user: User = Depends(get_current_user)):
     config = get_config()
-    existing_key = config.get("integrations", {}).get("anthropic_api_key", "")
+    existing = config.get("integrations", {})
     config["integrations"] = {
-        "anthropic_api_key": s.anthropic_api_key or existing_key,
+        "anthropic_api_key": s.anthropic_api_key or existing.get("anthropic_api_key", ""),
+        "smartcar_client_id": s.smartcar_client_id or existing.get("smartcar_client_id", ""),
+        "smartcar_client_secret": s.smartcar_client_secret or existing.get("smartcar_client_secret", ""),
     }
     save_config(config)
     return {"message": "Integration settings saved."}

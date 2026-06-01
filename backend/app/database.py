@@ -38,6 +38,11 @@ def run_migrations():
         "ALTER TABLE vehicle_parts ADD COLUMN needs_order BOOLEAN DEFAULT FALSE",
         "ALTER TABLE fuel_entries ADD COLUMN octane INTEGER",
         "ALTER TABLE vehicles ADD COLUMN tank_size_gallons FLOAT",
+        "ALTER TABLE vehicles ADD COLUMN smartcar_vehicle_id VARCHAR(255)",
+        "ALTER TABLE vehicles ADD COLUMN smartcar_access_token TEXT",
+        "ALTER TABLE vehicles ADD COLUMN smartcar_refresh_token TEXT",
+        "ALTER TABLE vehicles ADD COLUMN smartcar_token_expires_at DATETIME",
+        "ALTER TABLE vehicles ADD COLUMN smartcar_last_synced_at DATETIME",
         """CREATE TABLE IF NOT EXISTS inspection_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),

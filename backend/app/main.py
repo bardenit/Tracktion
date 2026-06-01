@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.database import engine, Base, run_migrations
-from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips, ocr, inspection, tires
+from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips, ocr, inspection, tires, smartcar
 from app.routes import settings as settings_router
 
 # Create tables and run migrations on startup
@@ -12,12 +12,26 @@ Base.metadata.create_all(bind=engine)
 run_migrations()
 
 
+async def _smartcar_daily_sync_loop():
+    import asyncio
+    while True:
+        await asyncio.sleep(86400)  # 24 hours
+        try:
+            from app.routes.smartcar import run_daily_sync
+            import concurrent.futures
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, run_daily_sync)
+        except Exception as e:
+            print(f"Smartcar daily sync error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    import asyncio
     print("Vehicle Tracker API Starting...")
+    sync_task = asyncio.create_task(_smartcar_daily_sync_loop())
     yield
-    # Shutdown
+    sync_task.cancel()
     print("Vehicle Tracker API Shutting Down...")
 
 
@@ -50,6 +64,7 @@ app.include_router(settings_router.router, prefix="/api/settings", tags=["settin
 app.include_router(ocr.router, prefix="/api/ocr", tags=["ocr"])
 app.include_router(inspection.router, prefix="/api/inspection", tags=["inspection"])
 app.include_router(tires.router, prefix="/api/tires", tags=["tires"])
+app.include_router(smartcar.router, prefix="/api/smartcar", tags=["smartcar"])
 
 
 @app.get("/")

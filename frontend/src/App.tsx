@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage';
 import VehiclesPage from './pages/VehiclesPage';
 import VehicleDetailPage from './pages/VehicleDetailPage';
 import SettingsPage from './pages/SettingsPage';
+import SmartcarCallbackPage from './pages/SmartcarCallbackPage';
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -93,6 +94,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout><SettingsPage /></Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/smartcar/callback"
+          element={
+            <ProtectedRoute>
+              <SmartcarCallbackPage />
             </ProtectedRoute>
           }
         />

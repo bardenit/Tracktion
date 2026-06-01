@@ -45,6 +45,11 @@ class Vehicle(Base):
     tank_size_gallons = Column(Float, nullable=True)
     nhtsa_data = Column(JSON, nullable=True)
     specs_overrides = Column(JSON, nullable=True)
+    smartcar_vehicle_id = Column(String(255), nullable=True)
+    smartcar_access_token = Column(Text, nullable=True)
+    smartcar_refresh_token = Column(Text, nullable=True)
+    smartcar_token_expires_at = Column(DateTime, nullable=True)
+    smartcar_last_synced_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
