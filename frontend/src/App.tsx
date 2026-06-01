@@ -9,6 +9,33 @@ import VehiclesPage from './pages/VehiclesPage';
 import VehicleDetailPage from './pages/VehicleDetailPage';
 import SettingsPage from './pages/SettingsPage';
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6">
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 max-w-md w-full text-center space-y-4">
+            <p className="text-white font-semibold text-lg">Something went wrong</p>
+            <p className="text-slate-400 text-sm">{(this.state.error as Error).message}</p>
+            <button
+              onClick={() => { this.setState({ error: null }); window.location.href = '/'; }}
+              className="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-6 rounded transition-colors"
+            >
+              Reload app
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -32,6 +59,7 @@ function App() {
   }, [checkAuth]);
 
   return (
+    <ErrorBoundary>
     <Router>
       <ToastContainer />
       <Routes>
@@ -70,6 +98,7 @@ function App() {
         />
       </Routes>
     </Router>
+    </ErrorBoundary>
   );
 }
 

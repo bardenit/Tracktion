@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -61,8 +61,8 @@ def _check_vehicle_access(vehicle_id: int, user_id: int, db: Session) -> Vehicle
 @router.post("/{vehicle_id}/documents", response_model=DocumentResponse)
 async def upload_document(
     vehicle_id: int,
-    document_type: str,
     file: UploadFile = File(...),
+    document_type: str = Form(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

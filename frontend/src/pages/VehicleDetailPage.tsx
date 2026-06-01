@@ -114,11 +114,12 @@ function fmtDate(dateStr: string) {
   });
 }
 
-function FormError({ msg }: { msg: string }) {
+function FormError({ msg }: { msg: any }) {
   if (!msg) return null;
+  const text = typeof msg === 'string' ? msg : 'An error occurred. Please try again.';
   return (
     <p className="text-red-400 text-sm bg-red-900/30 border border-red-800 p-3 rounded">
-      {msg}
+      {text}
     </p>
   );
 }
