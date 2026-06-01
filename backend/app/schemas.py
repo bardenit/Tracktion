@@ -401,9 +401,10 @@ class StorageSettingsResponse(BaseModel):
 
 class IntegrationsSettings(BaseModel):
     anthropic_api_key: Optional[str] = None
-    smartcar_client_id: Optional[str] = None       # Application ID UUID (for Connect URL)
-    smartcar_m2m_client_id: Optional[str] = None   # M2M Client ID (for token exchange)
-    smartcar_client_secret: Optional[str] = None   # M2M Client Secret
+    smartcar_client_id: Optional[str] = None            # Application ID UUID (for Connect URL)
+    smartcar_m2m_client_id: Optional[str] = None        # M2M Client ID (for bearer token exchange)
+    smartcar_client_secret: Optional[str] = None        # M2M Client Secret
+    smartcar_management_token: Optional[str] = None     # App management token (for vehicle listing)
 
 
 class IntegrationsSettingsResponse(BaseModel):
@@ -414,6 +415,7 @@ class IntegrationsSettingsResponse(BaseModel):
     smartcar_m2m_client_id_set: bool = False
     smartcar_m2m_client_id: Optional[str] = None
     smartcar_client_secret_set: bool = False
+    smartcar_management_token_set: bool = False
 
 
 # Smartcar schemas

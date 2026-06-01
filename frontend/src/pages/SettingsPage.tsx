@@ -63,12 +63,14 @@ export default function SettingsPage() {
   const [intStatus, setIntStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   // ── Smartcar ──────────────────────────────────────────────────────────────
-  const [smartcarClientId, setSmartcarClientId] = useState('');       // Application ID UUID
-  const [smartcarM2mClientId, setSmartcarM2mClientId] = useState(''); // M2M Client ID
-  const [smartcarClientSecret, setSmartcarClientSecret] = useState('');
+  const [smartcarClientId, setSmartcarClientId] = useState('');           // Application ID UUID
+  const [smartcarM2mClientId, setSmartcarM2mClientId] = useState('');     // M2M Client ID
+  const [smartcarClientSecret, setSmartcarClientSecret] = useState('');   // M2M Client Secret
+  const [smartcarMgmtToken, setSmartcarMgmtToken] = useState('');         // App management token
   const [smartcarClientIdSet, setSmartcarClientIdSet] = useState(false);
   const [smartcarM2mClientIdSet, setSmartcarM2mClientIdSet] = useState(false);
   const [smartcarClientSecretSet, setSmartcarClientSecretSet] = useState(false);
+  const [smartcarMgmtTokenSet, setSmartcarMgmtTokenSet] = useState(false);
   const [smartcarSaving, setSmartcarSaving] = useState(false);
   const [smartcarStatus, setSmartcarStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
@@ -110,6 +112,7 @@ export default function SettingsPage() {
         setSmartcarClientIdSet(s.smartcar_client_id_set || false);
         setSmartcarM2mClientIdSet(s.smartcar_m2m_client_id_set || false);
         setSmartcarClientSecretSet(s.smartcar_client_secret_set || false);
+        setSmartcarMgmtTokenSet(s.smartcar_management_token_set || false);
         if (s.smartcar_client_id) setSmartcarClientId(s.smartcar_client_id);
         if (s.smartcar_m2m_client_id) setSmartcarM2mClientId(s.smartcar_m2m_client_id);
       }).catch(() => {});
@@ -246,13 +249,16 @@ export default function SettingsPage() {
         smartcar_client_id: smartcarClientId || undefined,
         smartcar_m2m_client_id: smartcarM2mClientId || undefined,
         smartcar_client_secret: smartcarClientSecret || undefined,
+        smartcar_management_token: smartcarMgmtToken || undefined,
       });
       addToast('success', 'Smartcar credentials saved');
       setSmartcarClientSecret('');
+      setSmartcarMgmtToken('');
       const s = await apiClient.getIntegrationsSettings();
       setSmartcarClientIdSet(s.smartcar_client_id_set || false);
       setSmartcarM2mClientIdSet(s.smartcar_m2m_client_id_set || false);
       setSmartcarClientSecretSet(s.smartcar_client_secret_set || false);
+      setSmartcarMgmtTokenSet(s.smartcar_management_token_set || false);
       if (s.smartcar_client_id) setSmartcarClientId(s.smartcar_client_id);
       if (s.smartcar_m2m_client_id) setSmartcarM2mClientId(s.smartcar_m2m_client_id);
       setSmartcarStatus({ type: 'success', msg: 'Credentials saved. You can now connect vehicles from their detail page.' });
@@ -647,23 +653,23 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Smartcar</h2>
               <div className={`flex items-center gap-2 rounded px-3 py-2 text-sm mb-2 ${
-                smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet
+                smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet && smartcarMgmtTokenSet
                   ? 'bg-slate-700/50'
                   : 'bg-amber-900/20 border border-amber-700/40'
               }`}>
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet ? 'bg-green-400' : 'bg-amber-400'
+                  smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet && smartcarMgmtTokenSet ? 'bg-green-400' : 'bg-amber-400'
                 }`} />
                 <span className="text-slate-300">
-                  {smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet
+                  {smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet && smartcarMgmtTokenSet
                     ? 'Configured — connect vehicles from their detail page'
-                    : 'Not fully configured — add all three credentials to enable mileage sync'}
+                    : 'Not fully configured — all four credentials required'}
                 </span>
               </div>
               <p className="text-slate-500 text-xs">
                 From <span className="font-mono text-slate-400">dashboard.smartcar.com</span>:{' '}
-                Application ID from <em>Application Details</em>, M2M Client ID + Secret from <em>API Credentials</em>.
-                Set redirect URI to{' '}
+                Application ID from <em>Application Details</em>; M2M Client ID, M2M Secret, and App Management Token from <em>API Credentials</em>.
+                Redirect URI:{' '}
                 <span className="font-mono text-teal-400 break-all">{window.location.origin}/smartcar/callback</span>
               </p>
             </div>
@@ -704,6 +710,19 @@ export default function SettingsPage() {
                   onChange={(e) => setSmartcarClientSecret(e.target.value)}
                 />
               </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">
+                  App Management Token <span className="text-slate-500 text-xs">(API Credentials tab)</span>
+                  {smartcarMgmtTokenSet && <span className="text-slate-500 text-xs ml-1">(stored — blank to keep)</span>}
+                </label>
+                <input
+                  className="input-field font-mono text-sm"
+                  type="password"
+                  placeholder={smartcarMgmtTokenSet ? '••••••••' : 'Enter management token'}
+                  value={smartcarMgmtToken}
+                  onChange={(e) => setSmartcarMgmtToken(e.target.value)}
+                />
+              </div>
             </div>
 
             {smartcarStatus && (
@@ -712,7 +731,7 @@ export default function SettingsPage() {
 
             <button
               onClick={handleSaveSmartcar}
-              disabled={smartcarSaving || (!smartcarClientId && !smartcarM2mClientId && !smartcarClientSecret)}
+              disabled={smartcarSaving || (!smartcarClientId && !smartcarM2mClientId && !smartcarClientSecret && !smartcarMgmtToken)}
               className="btn-primary w-full"
             >
               {smartcarSaving ? 'Saving...' : 'Save Smartcar Credentials'}

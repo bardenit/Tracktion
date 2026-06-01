@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
 import urllib.parse
+import base64
 import httpx
 
 from app.auth import get_current_user
@@ -16,31 +17,49 @@ router = APIRouter()
 SMARTCAR_AUTH_URL = "https://connect.smartcar.com/oauth/authorize"
 SMARTCAR_TOKEN_URL = "https://iam.smartcar.com/oauth2/token"
 SMARTCAR_API_BASE = "https://api.smartcar.com/v2.0"
+SMARTCAR_MGMT_BASE = "https://management.smartcar.com/v2.0"
 
 
-def _smartcar_creds() -> tuple[str, str, str]:
-    """Returns (app_id, m2m_client_id, m2m_secret). app_id is for Connect URL; m2m_* for token exchange."""
+def _smartcar_creds() -> dict:
+    """Returns dict with all Smartcar credentials from config."""
     cfg = get_config().get("integrations", {})
-    app_id = cfg.get("smartcar_client_id", "")
-    m2m_client_id = cfg.get("smartcar_m2m_client_id", "")
-    m2m_secret = cfg.get("smartcar_client_secret", "")
-    if not app_id:
+    return {
+        "app_id": cfg.get("smartcar_client_id", ""),
+        "m2m_client_id": cfg.get("smartcar_m2m_client_id", ""),
+        "m2m_secret": cfg.get("smartcar_client_secret", ""),
+        "management_token": cfg.get("smartcar_management_token", ""),
+    }
+
+
+def _require_app_id(creds: dict) -> str:
+    if not creds["app_id"]:
         raise HTTPException(status_code=400, detail="Smartcar Application ID not configured — add it in Settings → Integrations")
+    return creds["app_id"]
+
+
+def _get_app_token(creds: dict) -> str:
+    """Fetches a fresh application-level bearer token via client_credentials grant."""
+    m2m_client_id = creds["m2m_client_id"]
+    m2m_secret = creds["m2m_secret"]
     if not m2m_client_id or not m2m_secret:
         raise HTTPException(status_code=400, detail="Smartcar M2M credentials not configured — add Client ID and Secret in Settings → Integrations")
-    return app_id, m2m_client_id, m2m_secret
-
-
-def _get_app_token(m2m_client_id: str, m2m_secret: str) -> str:
-    """Fetches a fresh application-level access token via client_credentials grant."""
     r = httpx.post(SMARTCAR_TOKEN_URL, data={
         "grant_type": "client_credentials",
         "client_id": m2m_client_id,
         "client_secret": m2m_secret,
     }, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
     if r.status_code != 200:
-        raise HTTPException(status_code=400, detail=f"Smartcar token request failed: {r.text}")
+        raise HTTPException(status_code=400, detail=f"Smartcar M2M token request failed: {r.text}")
     return r.json()["access_token"]
+
+
+def _mgmt_auth_header(creds: dict) -> str:
+    """Returns Basic auth header value for the management API."""
+    mgmt_token = creds["management_token"]
+    if not mgmt_token:
+        raise HTTPException(status_code=400, detail="Smartcar management token not configured — add it in Settings → Integrations")
+    encoded = base64.b64encode(f"default:{mgmt_token}".encode()).decode()
+    return f"Basic {encoded}"
 
 
 def _check_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
@@ -52,16 +71,11 @@ def _check_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
 
 def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
     """Fetch odometer from Smartcar and update vehicle mileage. Returns miles or None on failure."""
-    cfg = get_config().get("integrations", {})
-    m2m_client_id = cfg.get("smartcar_m2m_client_id", "")
-    m2m_secret = cfg.get("smartcar_client_secret", "")
-    if not m2m_client_id or not m2m_secret:
-        return None
     if not vehicle.smartcar_vehicle_id or not vehicle.smartcar_user_id:
         return None
-
     try:
-        access_token = _get_app_token(m2m_client_id, m2m_secret)
+        creds = _smartcar_creds()
+        access_token = _get_app_token(creds)
     except Exception:
         return None
 
@@ -105,7 +119,8 @@ def run_daily_sync():
 
 @router.get("/auth-url")
 def get_auth_url(redirect_uri: str, current_user: User = Depends(get_current_user)):
-    app_id, _, _ = _smartcar_creds()
+    creds = _smartcar_creds()
+    app_id = _require_app_id(creds)
     params = {
         "response_type": "code",
         "client_id": app_id,
@@ -119,26 +134,44 @@ def get_auth_url(redirect_uri: str, current_user: User = Depends(get_current_use
 
 @router.post("/connect", response_model=SmartcarConnectResponse)
 def connect_user(body: SmartcarConnectRequest, current_user: User = Depends(get_current_user)):
-    """Called after OAuth redirect — receives Smartcar user_id, lists their vehicles."""
-    _, m2m_client_id, m2m_secret = _smartcar_creds()
-    access_token = _get_app_token(m2m_client_id, m2m_secret)
+    """Called after OAuth redirect — receives Smartcar user_id, lists their vehicles via management API."""
+    creds = _smartcar_creds()
+    mgmt_auth = _mgmt_auth_header(creds)
 
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "sc-user-id": body.user_id,
-    }
-
-    vr = httpx.get(f"{SMARTCAR_API_BASE}/vehicles", headers=headers, timeout=15)
+    # Use management API to list vehicles connected by this user
+    mgmt_headers = {"Authorization": mgmt_auth}
+    vr = httpx.get(
+        f"{SMARTCAR_MGMT_BASE}/management/connections",
+        params={"user_id": body.user_id, "limit": 50},
+        headers=mgmt_headers,
+        timeout=15,
+    )
     if vr.status_code != 200:
         raise HTTPException(status_code=400, detail=f"Failed to list Smartcar vehicles: {vr.text}")
 
-    vehicle_ids = vr.json().get("vehicles", [])
+    connections = vr.json().get("connections", [])
+    if not connections:
+        raise HTTPException(status_code=400, detail="No vehicles found for this Smartcar account")
+
+    # Fetch vehicle info (make/model/year) for each connected vehicle using M2M bearer token
+    bearer_token = _get_app_token(creds)
+    bearer_headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "sc-user-id": body.user_id,
+    }
+
     vehicles = []
-    for vid in vehicle_ids:
-        info = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vid}", headers=headers, timeout=15)
+    for conn in connections:
+        vid = conn.get("vehicleId")
+        if not vid:
+            continue
+        info = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vid}", headers=bearer_headers, timeout=15)
         if info.status_code == 200:
             d = info.json()
             vehicles.append(SmartcarVehicleInfo(id=vid, make=d.get("make"), model=d.get("model"), year=d.get("year")))
+        else:
+            # Still include with just the ID if info fetch fails
+            vehicles.append(SmartcarVehicleInfo(id=vid))
 
     return SmartcarConnectResponse(user_id=body.user_id, vehicles=vehicles)
 
