@@ -15,6 +15,7 @@ interface Vehicle {
   model: string;
   year: number;
   vin?: string;
+  license_plate?: string;
   current_mileage: number;
   fuel_type: string;
   axle_count?: number;
@@ -86,7 +87,7 @@ interface Document {
   id: number;
   document_type: string;
   filename: string;
-  created_at: string;
+  uploaded_at: string;
 }
 
 const VEHICLE_SERVICE_TYPES = [
@@ -146,6 +147,62 @@ function ScanReceiptButton({ onScan }: { onScan: (file: File) => Promise<void> }
         )}
       </button>
       <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+function LicensePlateRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(vehicle.license_plate || '');
+  const [saving, setSaving] = useState(false);
+  const addToast = useToastStore((state) => state.addToast);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updated = await apiClient.updateVehicle(vehicle.id, { license_plate: value.trim() || null });
+      onUpdate(updated);
+      setEditing(false);
+      addToast('success', 'License plate updated');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex justify-between text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+        <span className="text-slate-400">License Plate</span>
+        <button
+          onClick={() => { setValue(vehicle.license_plate || ''); setEditing(true); }}
+          className="text-white font-mono hover:text-teal-400 transition-colors group flex items-center gap-1"
+        >
+          {vehicle.license_plate || <span className="text-slate-500 italic text-xs">Add plate</span>}
+          <span className="text-slate-500 group-hover:text-teal-400 text-xs">✎</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-2">
+      <span className="text-slate-400">License Plate</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          className="w-28 px-2 py-0.5 bg-slate-700 border border-teal-500 rounded text-white text-right font-mono text-sm focus:outline-none uppercase"
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          autoFocus
+          maxLength={20}
+          placeholder="ABC-1234"
+        />
+        <button onClick={save} disabled={saving} className="text-teal-400 hover:text-teal-300 text-xs font-medium">
+          {saving ? '...' : 'Save'}
+        </button>
+        <button onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      </div>
     </div>
   );
 }
@@ -855,6 +912,7 @@ export default function VehicleDetailPage() {
                 <span className="text-white font-mono text-right">{value}</span>
               </div>
             ))}
+            <LicensePlateRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
             <MileageRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
           </div>
 
@@ -1714,15 +1772,28 @@ export default function VehicleDetailPage() {
                     </span>
                     <p className="text-white text-sm mt-1.5 truncate">{doc.filename}</p>
                     <p className="text-slate-400 text-xs mt-0.5">
-                      {new Date(doc.created_at).toLocaleDateString()}
+                      {fmtDate(doc.uploaded_at.split('T')[0])}
                     </p>
                   </div>
-                  <button
-                    onClick={() => deleteDocument(doc.id)}
-                    className="text-red-400 hover:text-red-300 text-sm ml-4 flex-shrink-0 transition-colors"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex items-center gap-3 ml-4 flex-shrink-0">
+                    <button
+                      onClick={async () => {
+                        const response = await apiClient.downloadDocument(id, doc.id);
+                        const url = URL.createObjectURL(response);
+                        window.open(url, '_blank');
+                        setTimeout(() => URL.revokeObjectURL(url), 10000);
+                      }}
+                      className="text-teal-400 hover:text-teal-300 text-sm transition-colors"
+                    >
+                      Open
+                    </button>
+                    <button
+                      onClick={() => deleteDocument(doc.id)}
+                      className="text-red-400 hover:text-red-300 text-sm transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

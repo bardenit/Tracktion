@@ -37,6 +37,7 @@ class VehicleCreate(BaseModel):
     model: str
     year: int
     vin: Optional[str] = None
+    license_plate: Optional[str] = None
     current_mileage: float = 0
     fuel_type: str = "gasoline"
     axle_count: Optional[int] = None
@@ -49,6 +50,7 @@ class VehicleUpdate(BaseModel):
     model: Optional[str] = None
     year: Optional[int] = None
     vin: Optional[str] = None
+    license_plate: Optional[str] = None
     current_mileage: Optional[float] = None
     fuel_type: Optional[str] = None
     axle_count: Optional[int] = None
@@ -93,6 +95,7 @@ class VehicleResponse(BaseModel):
     model: str
     year: int
     vin: Optional[str]
+    license_plate: Optional[str] = None
     current_mileage: float
     fuel_type: str
     axle_count: Optional[int] = None

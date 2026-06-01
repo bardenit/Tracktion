@@ -454,6 +454,11 @@ class ApiClient {
     return response.data;
   }
 
+  async downloadDocument(vehicleId: number, documentId: number): Promise<Blob> {
+    const response = await this.client.get(`/documents/${vehicleId}/documents/${documentId}/download`, { responseType: 'blob' });
+    return response.data as Blob;
+  }
+
   async getVehiclePhoto(vehicleId: number): Promise<Blob | null> {
     try {
       const response = await this.client.get(`/documents/${vehicleId}/photo`, { responseType: 'blob' });

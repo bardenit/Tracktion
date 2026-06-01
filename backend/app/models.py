@@ -38,6 +38,7 @@ class Vehicle(Base):
     model = Column(String(255))
     year = Column(Integer)
     vin = Column(String(17), unique=True, index=True, nullable=True)
+    license_plate = Column(String(20), nullable=True)
     current_mileage = Column(Float, default=0)
     fuel_type = Column(String(50), default=FuelType.GASOLINE)
     axle_count = Column(Integer, nullable=True)

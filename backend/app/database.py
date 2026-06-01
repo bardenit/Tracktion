@@ -33,6 +33,7 @@ def run_migrations():
     new_columns = [
         "ALTER TABLE maintenance_reminders ADD COLUMN target_mileage FLOAT",
         "ALTER TABLE maintenance_reminders ADD COLUMN reminder_miles INTEGER",
+        "ALTER TABLE vehicles ADD COLUMN license_plate VARCHAR(20)",
     ]
     with engine.connect() as conn:
         for stmt in new_columns:
