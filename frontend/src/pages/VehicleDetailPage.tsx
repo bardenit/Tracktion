@@ -5,7 +5,7 @@ import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
 import AnalyticsTab from '../components/AnalyticsTab';
 
-type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect';
+type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect' | 'tires';
 
 interface Vehicle {
   id: number;
@@ -107,6 +107,24 @@ interface InspectionItem {
   category: string;
   last_checked_at: string | null;
   order_index: number;
+}
+
+interface TireEvent {
+  id: number;
+  event_type: 'install' | 'rotation' | 'pressure' | 'tread';
+  date: string;
+  mileage: number;
+  brand?: string;
+  size?: string;
+  pressure_fl?: number;
+  pressure_fr?: number;
+  pressure_rl?: number;
+  pressure_rr?: number;
+  tread_fl?: number;
+  tread_fr?: number;
+  tread_rl?: number;
+  tread_rr?: number;
+  notes?: string;
 }
 
 const VEHICLE_SERVICE_TYPES = [
@@ -475,6 +493,13 @@ export default function VehicleDetailPage() {
   const [vehiclePhotos, setVehiclePhotos] = useState<VehiclePhoto[]>([]);
   const [photoBlobMap, setPhotoBlobMap] = useState<Record<number, string>>({});
 
+  // Tire state
+  const [tireEvents, setTireEvents] = useState<TireEvent[]>([]);
+  const [tireModal, setTireModal] = useState(false);
+  const [editTireEvent, setEditTireEvent] = useState<TireEvent | null>(null);
+  const [tireEventType, setTireEventType] = useState<'install' | 'rotation' | 'pressure' | 'tread'>('rotation');
+  const [tireForm, setTireForm] = useState({ date: today(), mileage: 0, brand: '', size: '', pressure_fl: '', pressure_fr: '', pressure_rl: '', pressure_rr: '', tread_fl: '', tread_fr: '', tread_rl: '', tread_rr: '', notes: '' });
+
   // Inspection state
   const [inspectionItems, setInspectionItems] = useState<InspectionItem[]>([]);
   const [newInspectName, setNewInspectName] = useState('');
@@ -608,6 +633,7 @@ export default function VehicleDetailPage() {
     if (activeTab === 'trips') loadTrips().catch(console.error);
     if (activeTab === 'summary') loadPhotos().catch(console.error);
     if (activeTab === 'inspect') loadInspection().catch(console.error);
+    if (activeTab === 'tires') apiClient.listTireEvents(id).then(setTireEvents).catch(console.error);
     if (activeTab === 'analytics') {
       setAnalyticsLoading(true);
       const trailer = vehicle.vehicle_type === 'trailer';
@@ -890,6 +916,14 @@ export default function VehicleDetailPage() {
     return { daysLeft, estDate: new Date(Date.now() + daysLeft * 86400000) };
   };
 
+  const avgDailyMiles = (() => {
+    if (fuelEntries.length < 2) return null;
+    const sorted = [...fuelEntries].sort((a, b) => a.date.localeCompare(b.date));
+    const days = (new Date(sorted[sorted.length - 1].date).getTime() - new Date(sorted[0].date).getTime()) / 86400000;
+    if (days <= 0) return null;
+    return (sorted[sorted.length - 1].mileage - sorted[0].mileage) / days;
+  })();
+
   const reminderStatus = (r: Reminder) => {
     const threshold = r.reminder_miles ?? 500;
     if (r.is_overdue) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
@@ -907,6 +941,65 @@ export default function VehicleDetailPage() {
         return { color: 'text-amber-400', bg: 'bg-amber-900/30', label: `${remaining.toLocaleString()} mi left` };
     }
     return { color: 'text-green-400', bg: 'bg-green-900/20', label: 'OK' };
+  };
+
+  // ─── Tire handlers ──────────────────────────────────────────────────────────
+
+  const openTireAdd = (type: typeof tireEventType) => {
+    setEditTireEvent(null);
+    setTireEventType(type);
+    setTireForm({ date: today(), mileage: vehicle?.current_mileage ?? 0, brand: '', size: '', pressure_fl: '', pressure_fr: '', pressure_rl: '', pressure_rr: '', tread_fl: '', tread_fr: '', tread_rl: '', tread_rr: '', notes: '' });
+    setFormError('');
+    setTireModal(true);
+  };
+
+  const openTireEdit = (e: TireEvent) => {
+    setEditTireEvent(e);
+    setTireEventType(e.event_type);
+    setTireForm({ date: e.date, mileage: e.mileage, brand: e.brand ?? '', size: e.size ?? '', pressure_fl: e.pressure_fl?.toString() ?? '', pressure_fr: e.pressure_fr?.toString() ?? '', pressure_rl: e.pressure_rl?.toString() ?? '', pressure_rr: e.pressure_rr?.toString() ?? '', tread_fl: e.tread_fl?.toString() ?? '', tread_fr: e.tread_fr?.toString() ?? '', tread_rl: e.tread_rl?.toString() ?? '', tread_rr: e.tread_rr?.toString() ?? '', notes: e.notes ?? '' });
+    setFormError('');
+    setTireModal(true);
+  };
+
+  const saveTireEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setFormError('');
+    const num = (v: string) => v !== '' ? Number(v) : undefined;
+    const payload = {
+      event_type: tireEventType,
+      date: tireForm.date,
+      mileage: Number(tireForm.mileage),
+      brand: tireForm.brand || undefined,
+      size: tireForm.size || undefined,
+      pressure_fl: num(tireForm.pressure_fl), pressure_fr: num(tireForm.pressure_fr),
+      pressure_rl: num(tireForm.pressure_rl), pressure_rr: num(tireForm.pressure_rr),
+      tread_fl: num(tireForm.tread_fl), tread_fr: num(tireForm.tread_fr),
+      tread_rl: num(tireForm.tread_rl), tread_rr: num(tireForm.tread_rr),
+      notes: tireForm.notes || undefined,
+    };
+    try {
+      if (editTireEvent) {
+        await apiClient.updateTireEvent(id, editTireEvent.id, payload);
+        addToast('success', 'Updated');
+      } else {
+        await apiClient.createTireEvent(id, payload);
+        addToast('success', 'Saved');
+      }
+      setTireModal(false);
+      apiClient.listTireEvents(id).then(setTireEvents).catch(console.error);
+    } catch (err: any) {
+      setFormError(err.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteTireEvent = async (eventId: number) => {
+    if (!confirm('Delete this tire record?')) return;
+    await apiClient.deleteTireEvent(id, eventId).catch(console.error);
+    setTireEvents((prev) => prev.filter((e) => e.id !== eventId));
+    addToast('success', 'Deleted');
   };
 
   const startReminderNow = async (r: Reminder) => {
@@ -1021,6 +1114,7 @@ export default function VehicleDetailPage() {
     { id: 'maintenance', label: 'Maintenance' },
     { id: 'expenses', label: 'Expenses' },
     { id: 'parts', label: 'Parts' },
+    { id: 'tires', label: 'Tires' },
     { id: 'documents', label: 'Documents' },
     { id: 'inspect', label: 'Inspect' },
     { id: 'analytics', label: 'Analytics' },
@@ -1652,6 +1746,9 @@ export default function VehicleDetailPage() {
                             <p className="text-slate-400 text-xs mt-0.5">
                               Due at {r.next_due_mileage.toLocaleString()} mi
                               {r.reminder_miles ? ` · alert at ${(r.next_due_mileage - r.reminder_miles).toLocaleString()} mi` : ''}
+                              {avgDailyMiles && vehicle && r.next_due_mileage > vehicle.current_mileage && (
+                                <span className="ml-1 text-slate-500">≈ {Math.round((r.next_due_mileage - vehicle.current_mileage) / avgDailyMiles)} days</span>
+                              )}
                             </p>
                           ) : !r.target_mileage && !r.next_due_date && (
                             <button
@@ -2464,6 +2561,168 @@ export default function VehicleDetailPage() {
           </div>
         </form>
       </Modal>
+
+      {/* ── TIRES ───────────────────────────────────────────────────────────────── */}
+      {activeTab === 'tires' && (() => {
+        const currentSet = tireEvents.find((e) => e.event_type === 'install');
+        const milesSinceInstall = currentSet && vehicle ? vehicle.current_mileage - currentSet.mileage : null;
+        const EVENT_LABELS: Record<string, string> = { install: 'New Tires', rotation: 'Rotation', pressure: 'Pressure Check', tread: 'Tread Check' };
+        return (
+          <div className="space-y-5">
+            {/* Current tire set */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-semibold text-white">Current Tires</h2>
+                <button onClick={() => openTireAdd('install')} className="btn-primary text-sm">+ New Tires</button>
+              </div>
+              {currentSet ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Brand', value: currentSet.brand || '—' },
+                    { label: 'Size', value: currentSet.size || '—' },
+                    { label: 'Installed', value: fmtDate(currentSet.date) },
+                    { label: 'Miles on set', value: milesSinceInstall != null ? `${Math.round(milesSinceInstall).toLocaleString()} mi` : '—' },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-slate-400 text-xs">{label}</p>
+                      <p className="text-white font-medium mt-0.5 text-sm">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-slate-500 text-sm">No tire install recorded yet. Add one to track miles on your current set.</p>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="grid grid-cols-3 gap-2">
+              {(['rotation', 'pressure', 'tread'] as const).map((type) => (
+                <button key={type} onClick={() => openTireAdd(type)}
+                  className="btn-secondary text-sm py-2.5">
+                  + {EVENT_LABELS[type]}
+                </button>
+              ))}
+            </div>
+
+            {/* Event history */}
+            {tireEvents.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-slate-700">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-800/80">
+                    <tr className="text-slate-400 text-left">
+                      <th className="px-4 py-3 font-medium">Date</th>
+                      <th className="px-4 py-3 font-medium">Event</th>
+                      <th className="px-4 py-3 font-medium">Mileage</th>
+                      <th className="px-4 py-3 font-medium">Details</th>
+                      <th className="px-4 py-3 font-medium">Notes</th>
+                      <th className="px-4 py-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tireEvents.map((e) => {
+                      let detail = '';
+                      if (e.event_type === 'install') detail = [e.brand, e.size].filter(Boolean).join(' · ');
+                      else if (e.event_type === 'pressure' && e.pressure_fl != null) detail = `FL ${e.pressure_fl} FR ${e.pressure_fr} RL ${e.pressure_rl} RR ${e.pressure_rr} psi`;
+                      else if (e.event_type === 'tread' && e.tread_fl != null) detail = `FL ${e.tread_fl} FR ${e.tread_fr} RL ${e.tread_rl} RR ${e.tread_rr}/32"`;
+                      return (
+                        <tr key={e.id} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
+                          <td className="px-4 py-3 text-slate-300">{fmtDate(e.date)}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${e.event_type === 'install' ? 'bg-teal-900/50 text-teal-300' : e.event_type === 'rotation' ? 'bg-indigo-900/50 text-indigo-300' : e.event_type === 'pressure' ? 'bg-blue-900/50 text-blue-300' : 'bg-amber-900/50 text-amber-300'}`}>
+                              {EVENT_LABELS[e.event_type]}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-300">{e.mileage.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">{detail || '—'}</td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">{e.notes || '—'}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1">
+                              <button onClick={() => openTireEdit(e)} className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors">Edit</button>
+                              <button onClick={() => deleteTireEvent(e.id)} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">Del</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Tire event modal */}
+            <Modal isOpen={tireModal} onClose={() => setTireModal(false)} title={`${editTireEvent ? 'Edit' : 'Log'} — ${tireEventType === 'install' ? 'New Tires' : tireEventType === 'rotation' ? 'Tire Rotation' : tireEventType === 'pressure' ? 'Pressure Check' : 'Tread Check'}`}>
+              <form onSubmit={saveTireEvent} className="space-y-4">
+                <FormError msg={formError} />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">Date *</label>
+                    <input type="date" className="input-field" value={tireForm.date}
+                      onChange={(e) => setTireForm((p) => ({ ...p, date: e.target.value }))} required />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
+                    <input type="number" className="input-field" min="0" value={tireForm.mileage}
+                      onChange={(e) => setTireForm((p) => ({ ...p, mileage: Number(e.target.value) }))} required />
+                  </div>
+                </div>
+                {tireEventType === 'install' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-slate-300 mb-1">Brand</label>
+                      <input className="input-field" placeholder="e.g. Michelin" value={tireForm.brand}
+                        onChange={(e) => setTireForm((p) => ({ ...p, brand: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-300 mb-1">Size</label>
+                      <input className="input-field" placeholder="e.g. 265/70R17" value={tireForm.size}
+                        onChange={(e) => setTireForm((p) => ({ ...p, size: e.target.value }))} />
+                    </div>
+                  </div>
+                )}
+                {tireEventType === 'pressure' && (
+                  <>
+                    <p className="text-xs text-slate-400">Pressure (psi)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(['fl', 'fr', 'rl', 'rr'] as const).map((pos) => (
+                        <div key={pos}>
+                          <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
+                          <input type="number" className="input-field" min="0" step="0.1"
+                            value={(tireForm as any)[`pressure_${pos}`]}
+                            onChange={(e) => setTireForm((p) => ({ ...p, [`pressure_${pos}`]: e.target.value }))} />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {tireEventType === 'tread' && (
+                  <>
+                    <p className="text-xs text-slate-400">Tread depth (32nds of an inch)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(['fl', 'fr', 'rl', 'rr'] as const).map((pos) => (
+                        <div key={pos}>
+                          <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
+                          <input type="number" className="input-field" min="0" step="1"
+                            value={(tireForm as any)[`tread_${pos}`]}
+                            onChange={(e) => setTireForm((p) => ({ ...p, [`tread_${pos}`]: e.target.value }))} />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Notes</label>
+                  <textarea className="input-field" rows={2} value={tireForm.notes}
+                    onChange={(e) => setTireForm((p) => ({ ...p, notes: e.target.value }))} />
+                </div>
+                <div className="flex gap-3">
+                  <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : 'Save'}</button>
+                  <button type="button" onClick={() => setTireModal(false)} className="btn-secondary flex-1">Cancel</button>
+                </div>
+              </form>
+            </Modal>
+          </div>
+        );
+      })()}
 
       {/* ── INSPECT ─────────────────────────────────────────────────────────────── */}
       {activeTab === 'inspect' && (() => {

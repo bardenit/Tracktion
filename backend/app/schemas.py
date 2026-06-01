@@ -432,6 +432,47 @@ class InspectionItemResponse(BaseModel):
         from_attributes = True
 
 
+# Tire Event Schemas
+class TireEventCreate(BaseModel):
+    event_type: str  # install | rotation | pressure | tread
+    date: date
+    mileage: float
+    brand: Optional[str] = None
+    size: Optional[str] = None
+    pressure_fl: Optional[float] = None
+    pressure_fr: Optional[float] = None
+    pressure_rl: Optional[float] = None
+    pressure_rr: Optional[float] = None
+    tread_fl: Optional[float] = None
+    tread_fr: Optional[float] = None
+    tread_rl: Optional[float] = None
+    tread_rr: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class TireEventResponse(BaseModel):
+    id: int
+    vehicle_id: int
+    event_type: str
+    date: date
+    mileage: float
+    brand: Optional[str] = None
+    size: Optional[str] = None
+    pressure_fl: Optional[float] = None
+    pressure_fr: Optional[float] = None
+    pressure_rl: Optional[float] = None
+    pressure_rr: Optional[float] = None
+    tread_fl: Optional[float] = None
+    tread_fr: Optional[float] = None
+    tread_rl: Optional[float] = None
+    tread_rr: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # Photo listing schema
 class VehiclePhotoResponse(BaseModel):
     id: int

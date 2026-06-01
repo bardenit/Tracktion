@@ -504,6 +504,26 @@ class ApiClient {
     return response.data;
   }
 
+  async listTireEvents(vehicleId: number) {
+    const response = await this.client.get(`/tires/${vehicleId}/events`);
+    return response.data;
+  }
+
+  async createTireEvent(vehicleId: number, data: any) {
+    const response = await this.client.post(`/tires/${vehicleId}/events`, data);
+    return response.data;
+  }
+
+  async updateTireEvent(vehicleId: number, eventId: number, data: any) {
+    const response = await this.client.put(`/tires/${vehicleId}/events/${eventId}`, data);
+    return response.data;
+  }
+
+  async deleteTireEvent(vehicleId: number, eventId: number) {
+    const response = await this.client.delete(`/tires/${vehicleId}/events/${eventId}`);
+    return response.data;
+  }
+
   async getVehiclePhoto(vehicleId: number): Promise<Blob | null> {
     try {
       const response = await this.client.get(`/documents/${vehicleId}/photo`, { responseType: 'blob' });

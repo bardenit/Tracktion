@@ -58,6 +58,7 @@ class Vehicle(Base):
     parts = relationship("VehiclePart", back_populates="vehicle", cascade="all, delete-orphan")
     trip_entries = relationship("TripEntry", back_populates="vehicle", cascade="all, delete-orphan")
     inspection_items = relationship("InspectionItem", back_populates="vehicle", cascade="all, delete-orphan")
+    tire_events = relationship("TireEvent", back_populates="vehicle", cascade="all, delete-orphan")
 
 
 class VehicleCollaborator(Base):
@@ -203,6 +204,31 @@ class InspectionItem(Base):
     vehicle = relationship("Vehicle", back_populates="inspection_items")
 
 
+class TireEvent(Base):
+    __tablename__ = "tire_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), index=True)
+    # install | rotation | pressure | tread
+    event_type = Column(String(50))
+    date = Column(Date, index=True)
+    mileage = Column(Float)
+    brand = Column(String(100), nullable=True)
+    size = Column(String(50), nullable=True)
+    pressure_fl = Column(Float, nullable=True)
+    pressure_fr = Column(Float, nullable=True)
+    pressure_rl = Column(Float, nullable=True)
+    pressure_rr = Column(Float, nullable=True)
+    tread_fl = Column(Float, nullable=True)
+    tread_fr = Column(Float, nullable=True)
+    tread_rl = Column(Float, nullable=True)
+    tread_rr = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    vehicle = relationship("Vehicle", back_populates="tire_events")
+
+
 __all__ = [
     "User",
     "Vehicle",
@@ -215,4 +241,5 @@ __all__ = [
     "VehiclePart",
     "TripEntry",
     "InspectionItem",
+    "TireEvent",
 ]

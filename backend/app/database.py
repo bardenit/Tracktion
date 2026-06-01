@@ -47,6 +47,25 @@ def run_migrations():
             order_index INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )""",
+        """CREATE TABLE IF NOT EXISTS tire_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+            event_type VARCHAR(50) NOT NULL,
+            date DATE NOT NULL,
+            mileage FLOAT NOT NULL,
+            brand VARCHAR(100),
+            size VARCHAR(50),
+            pressure_fl FLOAT,
+            pressure_fr FLOAT,
+            pressure_rl FLOAT,
+            pressure_rr FLOAT,
+            tread_fl FLOAT,
+            tread_fr FLOAT,
+            tread_rl FLOAT,
+            tread_rr FLOAT,
+            notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
     ]
     with engine.connect() as conn:
         for stmt in new_columns:
