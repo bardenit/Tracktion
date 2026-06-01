@@ -34,6 +34,8 @@ def run_migrations():
         "ALTER TABLE maintenance_reminders ADD COLUMN target_mileage FLOAT",
         "ALTER TABLE maintenance_reminders ADD COLUMN reminder_miles INTEGER",
         "ALTER TABLE vehicles ADD COLUMN license_plate VARCHAR(20)",
+        "ALTER TABLE expenses ADD COLUMN expires_on DATE",
+        "ALTER TABLE vehicle_parts ADD COLUMN needs_order BOOLEAN DEFAULT FALSE",
     ]
     with engine.connect() as conn:
         for stmt in new_columns:

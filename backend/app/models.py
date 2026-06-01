@@ -114,6 +114,7 @@ class Expense(Base):
     amount = Column(Float)
     date = Column(Date, index=True)
     description = Column(String(255))
+    expires_on = Column(Date, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     vehicle = relationship("Vehicle", back_populates="expenses")
@@ -178,6 +179,7 @@ class VehiclePart(Base):
     brand = Column(String(100), nullable=True)
     category = Column(String(50), default="other")
     notes = Column(Text, nullable=True)
+    needs_order = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

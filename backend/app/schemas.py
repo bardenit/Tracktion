@@ -113,6 +113,7 @@ class VehiclePartCreate(BaseModel):
     brand: Optional[str] = None
     category: str = "other"
     notes: Optional[str] = None
+    needs_order: bool = False
 
 
 class VehiclePartUpdate(BaseModel):
@@ -121,6 +122,7 @@ class VehiclePartUpdate(BaseModel):
     brand: Optional[str] = None
     category: Optional[str] = None
     notes: Optional[str] = None
+    needs_order: Optional[bool] = None
 
 
 class VehiclePartResponse(BaseModel):
@@ -131,6 +133,7 @@ class VehiclePartResponse(BaseModel):
     brand: Optional[str] = None
     category: str
     notes: Optional[str] = None
+    needs_order: bool = False
     created_at: datetime
 
     class Config:
@@ -195,6 +198,7 @@ class ExpenseCreate(BaseModel):
     amount: float
     date: date
     description: str
+    expires_on: Optional[date] = None
 
 
 class ExpenseResponse(BaseModel):
@@ -204,6 +208,7 @@ class ExpenseResponse(BaseModel):
     amount: float
     date: date
     description: str
+    expires_on: Optional[date] = None
     created_at: datetime
 
     class Config:

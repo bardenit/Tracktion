@@ -40,6 +40,22 @@ interface ActivityItem {
   amount: number | null;
 }
 
+interface Reminder {
+  id: number;
+  service_type: string;
+  is_overdue: boolean;
+  next_due_mileage?: number;
+  next_due_date?: string;
+  reminder_miles?: number;
+}
+
+interface Expense {
+  id: number;
+  description: string;
+  category: string;
+  expires_on?: string;
+}
+
 function fmt(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
     month: 'short',
@@ -58,6 +74,8 @@ export default function DashboardPage() {
   const [tripStats, setTripStats] = useState<TripStats | null>(null);
   const [maintenanceStats, setMaintenanceStats] = useState<MaintenanceStats | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(false);
 
@@ -84,6 +102,10 @@ export default function DashboardPage() {
 
     setStatsLoading(true);
     const isTrailer = vehicle.vehicle_type === 'trailer';
+
+    // Always load reminders and expenses for alerts
+    apiClient.listMaintenanceReminders(selectedId).then(setReminders).catch(console.error);
+    apiClient.listExpenses(selectedId).then(setExpenses).catch(console.error);
 
     if (isTrailer) {
       Promise.all([
@@ -249,6 +271,53 @@ export default function DashboardPage() {
           <p className="text-slate-500 text-xs mt-1">{isTrailer ? 'maintenance' : 'fuel + maintenance'}</p>
         </div>
       </div>
+
+      {/* Alerts */}
+      {(() => {
+        const overdueReminders = reminders.filter((r) => r.is_overdue);
+        const upcomingReminders = reminders.filter((r) => {
+          if (r.is_overdue) return false;
+          if (r.next_due_mileage && selectedVehicle) {
+            const left = r.next_due_mileage - selectedVehicle.current_mileage;
+            return left >= 0 && left <= (r.reminder_miles ?? 500);
+          }
+          if (r.next_due_date) {
+            const daysLeft = Math.ceil((new Date(r.next_due_date + 'T00:00:00').getTime() - Date.now()) / 86400000);
+            return daysLeft >= 0 && daysLeft <= 14;
+          }
+          return false;
+        });
+        const expiringExpenses = expenses.filter((e) => {
+          if (!e.expires_on) return false;
+          const daysLeft = Math.ceil((new Date(e.expires_on + 'T00:00:00').getTime() - Date.now()) / 86400000);
+          return daysLeft <= 30;
+        });
+        const alerts = [
+          ...overdueReminders.map((r) => ({ level: 'red' as const, text: `${r.service_type} is overdue`, tab: 'maintenance' })),
+          ...upcomingReminders.map((r) => ({ level: 'amber' as const, text: `${r.service_type} coming up soon`, tab: 'maintenance' })),
+          ...expiringExpenses.map((e) => {
+            const days = Math.ceil((new Date(e.expires_on! + 'T00:00:00').getTime() - Date.now()) / 86400000);
+            return { level: days < 0 ? 'red' as const : 'amber' as const, text: days < 0 ? `${e.description} has expired` : `${e.description} expires in ${days} day${days === 1 ? '' : 's'}`, tab: 'expenses' };
+          }),
+        ];
+        if (alerts.length === 0) return null;
+        return (
+          <div className="space-y-2">
+            {alerts.map((a, i) => (
+              <button key={i} onClick={() => navigate(`/vehicles/${selectedId}?tab=${a.tab}`)}
+                className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border text-sm transition-colors ${
+                  a.level === 'red'
+                    ? 'bg-red-900/20 border-red-700/50 text-red-300 hover:bg-red-900/30'
+                    : 'bg-amber-900/20 border-amber-700/50 text-amber-300 hover:bg-amber-900/30'
+                }`}>
+                <span className="flex-shrink-0">{a.level === 'red' ? '⚠' : '!'}</span>
+                <span>{a.text}</span>
+                <span className="ml-auto text-xs opacity-60">View →</span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Quick actions */}
       <div className="card">

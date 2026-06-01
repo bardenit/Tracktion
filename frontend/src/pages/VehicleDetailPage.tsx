@@ -39,6 +39,7 @@ interface VehiclePart {
   brand?: string;
   category: string;
   notes?: string;
+  needs_order: boolean;
 }
 
 interface FuelEntry {
@@ -81,6 +82,7 @@ interface Expense {
   amount: number;
   date: string;
   description: string;
+  expires_on?: string;
 }
 
 interface Document {
@@ -108,6 +110,18 @@ const EXPENSE_CATEGORIES = ['insurance', 'registration', 'repair', 'fuel', 'othe
 const DOC_TYPES = ['registration', 'insurance', 'receipt', 'service', 'warranty', 'other'];
 
 const today = () => new Date().toISOString().split('T')[0];
+
+function downloadCSV(rows: Record<string, unknown>[], filename: string) {
+  if (!rows.length) return;
+  const keys = Object.keys(rows[0]);
+  const escape = (v: unknown) => JSON.stringify(v ?? '');
+  const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => escape(r[k])).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 function fmtDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
@@ -390,8 +404,8 @@ export default function VehicleDetailPage() {
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
   const [reminderTrigger, setReminderTrigger] = useState<'interval' | 'target'>('interval');
   const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
-  const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '' });
-  const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '' });
+  const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '', expires_on: '' });
+  const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '', needs_order: false });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docType, setDocType] = useState('registration');
 
@@ -657,7 +671,7 @@ export default function VehicleDetailPage() {
   // ─── Expense handlers ────────────────────────────────────────────────────────
 
   const openExpenseAdd = () => {
-    setExpenseForm({ category: 'insurance', amount: 0, date: today(), description: '' });
+    setExpenseForm({ category: 'insurance', amount: 0, date: today(), description: '', expires_on: '' });
     setFormError('');
     setExpenseCatsOpen(false);
     setExpenseModal(true);
@@ -668,7 +682,11 @@ export default function VehicleDetailPage() {
     setSaving(true);
     setFormError('');
     try {
-      await apiClient.createExpense(id, { ...expenseForm, amount: Number(expenseForm.amount) });
+      await apiClient.createExpense(id, {
+        ...expenseForm,
+        amount: Number(expenseForm.amount),
+        expires_on: expenseForm.expires_on || undefined,
+      });
       setExpenseModal(false);
       loadExpenses().catch(console.error);
       addToast('success', 'Expense added');
@@ -1046,12 +1064,17 @@ export default function VehicleDetailPage() {
         <div className="space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Trip Log</h2>
-            <button onClick={() => {
-              setEditTrip(null);
-              setTripForm({ date: today(), miles: 0, destination: '', notes: '' });
-              setFormError('');
-              setTripModal(true);
-            }} className="btn-primary text-sm">+ Log Trip</button>
+            <div className="flex gap-2">
+              {tripEntries.length > 0 && (
+                <button onClick={() => downloadCSV(tripEntries.map((e) => ({ date: e.date, miles: e.miles, destination: e.destination ?? '', notes: e.notes ?? '' })), 'trip-log.csv')} className="btn-secondary text-sm">Export CSV</button>
+              )}
+              <button onClick={() => {
+                setEditTrip(null);
+                setTripForm({ date: today(), miles: 0, destination: '', notes: '' });
+                setFormError('');
+                setTripModal(true);
+              }} className="btn-primary text-sm">+ Log Trip</button>
+            </div>
           </div>
 
           {tripStats && (
@@ -1167,9 +1190,12 @@ export default function VehicleDetailPage() {
         <div className="space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Fuel History</h2>
-            <button onClick={openFuelAdd} className="btn-primary text-sm">
-              + Log Fill-up
-            </button>
+            <div className="flex gap-2">
+              {fuelEntries.length > 0 && (
+                <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, mpg: e.mpg ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+              )}
+              <button onClick={openFuelAdd} className="btn-primary text-sm">+ Log Fill-up</button>
+            </div>
           </div>
 
           {fuelStats && (
@@ -1399,9 +1425,12 @@ export default function VehicleDetailPage() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-white">Service History</h2>
-              <button onClick={openMaintAdd} className="btn-primary text-sm">
-                + Log Service
-              </button>
+              <div className="flex gap-2">
+                {maintEntries.length > 0 && (
+                  <button onClick={() => downloadCSV(maintEntries.map((e) => ({ date: e.date, type: e.type, mileage: e.mileage, cost: e.cost, provider: e.service_provider ?? '', notes: e.notes ?? '' })), 'maintenance-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                )}
+                <button onClick={openMaintAdd} className="btn-primary text-sm">+ Log Service</button>
+              </div>
             </div>
             {maintEntries.length === 0 ? (
               <div className="card text-center py-10">
@@ -1648,9 +1677,12 @@ export default function VehicleDetailPage() {
         <div className="space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Expenses</h2>
-            <button onClick={openExpenseAdd} className="btn-primary text-sm">
-              + Add Expense
-            </button>
+            <div className="flex gap-2">
+              {expenses.length > 0 && (
+                <button onClick={() => downloadCSV(expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, amount: e.amount, expires_on: e.expires_on ?? '' })), 'expenses.csv')} className="btn-secondary text-sm">Export CSV</button>
+              )}
+              <button onClick={openExpenseAdd} className="btn-primary text-sm">+ Add Expense</button>
+            </div>
           </div>
 
           {expenses.length === 0 ? (
@@ -1667,11 +1699,16 @@ export default function VehicleDetailPage() {
                       <th className="px-4 py-3 font-medium">Category</th>
                       <th className="px-4 py-3 font-medium">Description</th>
                       <th className="px-4 py-3 font-medium">Amount</th>
+                      <th className="px-4 py-3 font-medium">Expires</th>
                       <th className="px-4 py-3"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {expenses.map((e) => (
+                    {expenses.map((e) => {
+                      const expDaysLeft = e.expires_on
+                        ? Math.ceil((new Date(e.expires_on + 'T00:00:00').getTime() - Date.now()) / 86400000)
+                        : null;
+                      return (
                       <tr key={e.id} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
                         <td className="px-4 py-3 text-slate-300">{fmtDate(e.date)}</td>
                         <td className="px-4 py-3">
@@ -1681,6 +1718,15 @@ export default function VehicleDetailPage() {
                         </td>
                         <td className="px-4 py-3 text-slate-300">{e.description}</td>
                         <td className="px-4 py-3 text-white font-medium">${Number(e.amount).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-sm">
+                          {e.expires_on ? (
+                            <span className={expDaysLeft !== null && expDaysLeft <= 30 ? 'text-amber-400 font-medium' : 'text-slate-300'}>
+                              {fmtDate(e.expires_on)}
+                              {expDaysLeft !== null && expDaysLeft <= 30 && expDaysLeft >= 0 && <span className="text-xs ml-1">({expDaysLeft}d)</span>}
+                              {expDaysLeft !== null && expDaysLeft < 0 && <span className="text-red-400 text-xs ml-1">(expired)</span>}
+                            </span>
+                          ) : <span className="text-slate-600">—</span>}
+                        </td>
                         <td className="px-4 py-3">
                           <button
                             onClick={() => deleteExpense(e.id)}
@@ -1690,7 +1736,8 @@ export default function VehicleDetailPage() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-slate-600">
@@ -1700,6 +1747,7 @@ export default function VehicleDetailPage() {
                       <td className="px-4 py-3 text-white font-bold">
                         ${expenses.reduce((sum, e) => sum + Number(e.amount), 0).toFixed(2)}
                       </td>
+                      <td></td>
                       <td></td>
                     </tr>
                   </tfoot>
@@ -1777,6 +1825,11 @@ export default function VehicleDetailPage() {
                 <input className="input-field" placeholder="e.g. Monthly auto insurance"
                   value={expenseForm.description}
                   onChange={(e) => setExpenseForm((p) => ({ ...p, description: e.target.value }))} required />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Expiry Date <span className="text-slate-500">(optional — for insurance, registration, etc.)</span></label>
+                <input type="date" className="input-field" value={expenseForm.expires_on}
+                  onChange={(e) => setExpenseForm((p) => ({ ...p, expires_on: e.target.value }))} />
               </div>
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
@@ -1890,7 +1943,7 @@ export default function VehicleDetailPage() {
             <h2 className="text-lg font-semibold text-white">Parts & Part Numbers</h2>
             <button onClick={() => {
               setEditPart(null);
-              setPartForm({ name: '', part_number: '', brand: '', category: 'filters', notes: '' });
+              setPartForm({ name: '', part_number: '', brand: '', category: 'filters', notes: '', needs_order: false });
               setFormError('');
               setPartModal(true);
             }} className="btn-primary text-sm">+ Add Part</button>
@@ -1900,6 +1953,27 @@ export default function VehicleDetailPage() {
             <div className="card text-center py-10 text-slate-400">No parts added yet.</div>
           ) : (
             <div className="space-y-3">
+              {/* Shopping list */}
+              {parts.some((p) => p.needs_order) && (
+                <div className="card border border-amber-700/50 bg-amber-900/10">
+                  <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Shopping List</h3>
+                  <div className="space-y-2">
+                    {parts.filter((p) => p.needs_order).map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-sm">
+                        <div className="min-w-0">
+                          <span className="text-white font-medium">{p.name}</span>
+                          {p.brand && <span className="text-slate-400 ml-2">{p.brand}</span>}
+                          {p.part_number && <span className="font-mono text-teal-300 ml-2">#{p.part_number}</span>}
+                        </div>
+                        <button onClick={async () => {
+                          await apiClient.updatePart(id, p.id, { needs_order: false });
+                          loadParts();
+                        }} className="text-xs text-amber-400 hover:text-amber-300 ml-4 flex-shrink-0">Got it</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {(['filters', 'engine', 'drivetrain', 'brakes', 'suspension', 'electrical', 'trailer', 'other'] as const).map((cat) => {
                 const catParts = parts.filter((p) => p.category === cat);
                 if (catParts.length === 0) return null;
@@ -1910,17 +1984,26 @@ export default function VehicleDetailPage() {
                       {catParts.map((p) => (
                         <div key={p.id} className="flex items-start justify-between gap-4 text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
                           <div className="min-w-0">
-                            <p className="text-white font-medium">{p.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-white font-medium">{p.name}</p>
+                              {p.needs_order && <span className="text-xs bg-amber-900/40 text-amber-400 border border-amber-700/50 px-1.5 py-0.5 rounded">Need to order</span>}
+                            </div>
                             <div className="flex flex-wrap gap-3 mt-0.5 text-slate-400">
                               {p.brand && <span>{p.brand}</span>}
                               {p.part_number && <span className="font-mono text-teal-300">#{p.part_number}</span>}
                               {p.notes && <span className="italic">{p.notes}</span>}
                             </div>
                           </div>
-                          <div className="flex gap-2 flex-shrink-0">
+                          <div className="flex gap-2 flex-shrink-0 items-center">
+                            <button onClick={async () => {
+                              await apiClient.updatePart(id, p.id, { needs_order: !p.needs_order });
+                              loadParts();
+                            }} className={`text-xs transition-colors ${p.needs_order ? 'text-amber-400 hover:text-amber-300' : 'text-slate-500 hover:text-amber-400'}`} title={p.needs_order ? 'Mark as available' : 'Add to shopping list'}>
+                              {p.needs_order ? '★' : '☆'}
+                            </button>
                             <button onClick={() => {
                               setEditPart(p);
-                              setPartForm({ name: p.name, part_number: p.part_number || '', brand: p.brand || '', category: p.category, notes: p.notes || '' });
+                              setPartForm({ name: p.name, part_number: p.part_number || '', brand: p.brand || '', category: p.category, notes: p.notes || '', needs_order: p.needs_order });
                               setFormError('');
                               setPartModal(true);
                             }} className="text-slate-400 hover:text-white transition-colors text-xs">Edit</button>
@@ -1946,7 +2029,7 @@ export default function VehicleDetailPage() {
               setSaving(true);
               setFormError('');
               try {
-                const payload = { ...partForm, part_number: partForm.part_number || undefined, brand: partForm.brand || undefined, notes: partForm.notes || undefined };
+                const payload = { ...partForm, part_number: partForm.part_number || undefined, brand: partForm.brand || undefined, notes: partForm.notes || undefined, needs_order: partForm.needs_order };
                 if (editPart) {
                   await apiClient.updatePart(id, editPart.id, payload);
                 } else {
@@ -1986,6 +2069,10 @@ export default function VehicleDetailPage() {
                 <div className="col-span-2">
                   <label className="block text-sm text-slate-300 mb-1">Notes</label>
                   <input className="input-field" placeholder="Optional notes" value={partForm.notes} onChange={(e) => setPartForm((p) => ({ ...p, notes: e.target.value }))} />
+                </div>
+                <div className="col-span-2 flex items-center gap-2">
+                  <input type="checkbox" id="needs_order" checked={partForm.needs_order} onChange={(e) => setPartForm((p) => ({ ...p, needs_order: e.target.checked }))} className="w-4 h-4 accent-amber-400" />
+                  <label htmlFor="needs_order" className="text-sm text-slate-300">Add to shopping list (need to order)</label>
                 </div>
               </div>
               <div className="flex gap-3 pt-1">
