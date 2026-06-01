@@ -56,6 +56,7 @@ class Vehicle(Base):
     collaborators = relationship("VehicleCollaborator", back_populates="vehicle", cascade="all, delete-orphan")
     parts = relationship("VehiclePart", back_populates="vehicle", cascade="all, delete-orphan")
     trip_entries = relationship("TripEntry", back_populates="vehicle", cascade="all, delete-orphan")
+    inspection_items = relationship("InspectionItem", back_populates="vehicle", cascade="all, delete-orphan")
 
 
 class VehicleCollaborator(Base):
@@ -186,6 +187,20 @@ class VehiclePart(Base):
     vehicle = relationship("Vehicle", back_populates="parts")
 
 
+class InspectionItem(Base):
+    __tablename__ = "inspection_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), index=True)
+    name = Column(String(255))
+    category = Column(String(100))
+    last_checked_at = Column(DateTime, nullable=True)
+    order_index = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+
+    vehicle = relationship("Vehicle", back_populates="inspection_items")
+
+
 __all__ = [
     "User",
     "Vehicle",
@@ -197,4 +212,5 @@ __all__ = [
     "MaintenanceReminder",
     "VehiclePart",
     "TripEntry",
+    "InspectionItem",
 ]

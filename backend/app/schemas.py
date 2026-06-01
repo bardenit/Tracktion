@@ -400,3 +400,39 @@ class IntegrationsSettings(BaseModel):
 class IntegrationsSettingsResponse(BaseModel):
     anthropic_api_key_set: bool
     anthropic_api_key_preview: Optional[str] = None
+
+
+# Inspection Schemas
+class InspectionItemCreate(BaseModel):
+    name: str
+    category: str = "general"
+    order_index: int = 0
+
+
+class InspectionItemUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    last_checked_at: Optional[datetime] = None
+    order_index: Optional[int] = None
+
+
+class InspectionItemResponse(BaseModel):
+    id: int
+    vehicle_id: int
+    name: str
+    category: str
+    last_checked_at: Optional[datetime] = None
+    order_index: int
+
+    class Config:
+        from_attributes = True
+
+
+# Photo listing schema
+class VehiclePhotoResponse(BaseModel):
+    id: int
+    filename: Optional[str]
+    uploaded_at: datetime
+
+    class Config:
+        from_attributes = True

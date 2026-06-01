@@ -36,6 +36,15 @@ def run_migrations():
         "ALTER TABLE vehicles ADD COLUMN license_plate VARCHAR(20)",
         "ALTER TABLE expenses ADD COLUMN expires_on DATE",
         "ALTER TABLE vehicle_parts ADD COLUMN needs_order BOOLEAN DEFAULT FALSE",
+        """CREATE TABLE IF NOT EXISTS inspection_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+            name VARCHAR(255) NOT NULL,
+            category VARCHAR(100) NOT NULL DEFAULT 'general',
+            last_checked_at DATETIME,
+            order_index INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
     ]
     with engine.connect() as conn:
         for stmt in new_columns:

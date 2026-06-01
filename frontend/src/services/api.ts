@@ -459,6 +459,46 @@ class ApiClient {
     return response.data as Blob;
   }
 
+  async listVehiclePhotos(vehicleId: number) {
+    const response = await this.client.get(`/documents/${vehicleId}/photos`);
+    return response.data;
+  }
+
+  async deleteVehiclePhotoById(vehicleId: number, photoId: number) {
+    const response = await this.client.delete(`/documents/${vehicleId}/photos/${photoId}`);
+    return response.data;
+  }
+
+  async getVehiclePhotoById(vehicleId: number, photoId: number): Promise<Blob> {
+    const response = await this.client.get(`/documents/${vehicleId}/documents/${photoId}/download`, { responseType: 'blob' });
+    return response.data as Blob;
+  }
+
+  async listInspectionItems(vehicleId: number) {
+    const response = await this.client.get(`/inspection/${vehicleId}/items`);
+    return response.data;
+  }
+
+  async checkInspectionItem(vehicleId: number, itemId: number) {
+    const response = await this.client.post(`/inspection/${vehicleId}/items/${itemId}/check`);
+    return response.data;
+  }
+
+  async resetInspection(vehicleId: number) {
+    const response = await this.client.post(`/inspection/${vehicleId}/reset`);
+    return response.data;
+  }
+
+  async createInspectionItem(vehicleId: number, data: { name: string; category: string }) {
+    const response = await this.client.post(`/inspection/${vehicleId}/items`, data);
+    return response.data;
+  }
+
+  async deleteInspectionItem(vehicleId: number, itemId: number) {
+    const response = await this.client.delete(`/inspection/${vehicleId}/items/${itemId}`);
+    return response.data;
+  }
+
   async getVehiclePhoto(vehicleId: number): Promise<Blob | null> {
     try {
       const response = await this.client.get(`/documents/${vehicleId}/photo`, { responseType: 'blob' });

@@ -5,7 +5,7 @@ import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
 import AnalyticsTab from '../components/AnalyticsTab';
 
-type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics';
+type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect';
 
 interface Vehicle {
   id: number;
@@ -90,6 +90,20 @@ interface Document {
   document_type: string;
   filename: string;
   uploaded_at: string;
+}
+
+interface VehiclePhoto {
+  id: number;
+  filename?: string;
+  uploaded_at: string;
+}
+
+interface InspectionItem {
+  id: number;
+  name: string;
+  category: string;
+  last_checked_at: string | null;
+  order_index: number;
 }
 
 const VEHICLE_SERVICE_TYPES = [
@@ -377,6 +391,15 @@ export default function VehicleDetailPage() {
   // Parts state
   const [parts, setParts] = useState<VehiclePart[]>([]);
 
+  // Photo gallery state
+  const [vehiclePhotos, setVehiclePhotos] = useState<VehiclePhoto[]>([]);
+  const [photoBlobMap, setPhotoBlobMap] = useState<Record<number, string>>({});
+
+  // Inspection state
+  const [inspectionItems, setInspectionItems] = useState<InspectionItem[]>([]);
+  const [newInspectName, setNewInspectName] = useState('');
+  const [newInspectCat, setNewInspectCat] = useState('General');
+
   // Trip state
   const [tripEntries, setTripEntries] = useState<TripEntry[]>([]);
   const [tripStats, setTripStats] = useState<any>(null);
@@ -447,6 +470,27 @@ export default function VehicleDetailPage() {
     setParts(await apiClient.listParts(id));
   }, [id]);
 
+  const loadPhotos = useCallback(async () => {
+    const photos: VehiclePhoto[] = await apiClient.listVehiclePhotos(id);
+    setVehiclePhotos(photos);
+    // Fetch blobs for each photo
+    const blobMap: Record<number, string> = {};
+    await Promise.all(photos.map(async (p) => {
+      try {
+        const blob = await apiClient.getVehiclePhotoById(id, p.id);
+        blobMap[p.id] = URL.createObjectURL(blob);
+      } catch { /* skip */ }
+    }));
+    setPhotoBlobMap((prev) => {
+      Object.values(prev).forEach((url) => URL.revokeObjectURL(url));
+      return blobMap;
+    });
+  }, [id]);
+
+  const loadInspection = useCallback(async () => {
+    setInspectionItems(await apiClient.listInspectionItems(id));
+  }, [id]);
+
   const loadTrips = useCallback(async () => {
     const [entries, stats] = await Promise.all([
       apiClient.listTrips(id),
@@ -482,6 +526,8 @@ export default function VehicleDetailPage() {
     if (activeTab === 'documents') loadDocuments().catch(console.error);
     if (activeTab === 'parts') loadParts().catch(console.error);
     if (activeTab === 'trips') loadTrips().catch(console.error);
+    if (activeTab === 'summary') loadPhotos().catch(console.error);
+    if (activeTab === 'inspect') loadInspection().catch(console.error);
     if (activeTab === 'analytics') {
       setAnalyticsLoading(true);
       const trailer = vehicle.vehicle_type === 'trailer';
@@ -651,6 +697,7 @@ export default function VehicleDetailPage() {
         setPhotoUrl(url);
       }
       addToast('success', 'Photo saved');
+      loadPhotos().catch(console.error);
     } catch (err: any) {
       addToast('error', err?.response?.data?.detail || 'Upload failed');
     } finally {
@@ -878,6 +925,7 @@ export default function VehicleDetailPage() {
     { id: 'expenses', label: 'Expenses' },
     { id: 'parts', label: 'Parts' },
     { id: 'documents', label: 'Documents' },
+    { id: 'inspect', label: 'Inspect' },
     { id: 'analytics', label: 'Analytics' },
   ];
 
@@ -983,6 +1031,47 @@ export default function VehicleDetailPage() {
             ))}
             <LicensePlateRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
             <MileageRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
+          </div>
+
+          {/* Photo gallery */}
+          <div className="card sm:col-span-2">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-white">Photos</h2>
+              <label className={`btn-secondary text-xs cursor-pointer px-3 py-1 ${photoUploading ? 'opacity-50' : ''}`}>
+                {photoUploading ? 'Uploading…' : '+ Add Photo'}
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} disabled={photoUploading} />
+              </label>
+            </div>
+            {vehiclePhotos.length === 0 ? (
+              <p className="text-slate-400 text-sm">No photos yet.</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {vehiclePhotos.map((p) => (
+                  <div key={p.id} className="relative group rounded-lg overflow-hidden aspect-video bg-slate-800">
+                    {photoBlobMap[p.id] && (
+                      <img src={photoBlobMap[p.id]} alt="" className="w-full h-full object-cover" />
+                    )}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Delete this photo?')) return;
+                        await apiClient.deleteVehiclePhotoById(id, p.id);
+                        loadPhotos();
+                        // Refresh header photo
+                        const blob = await apiClient.getVehiclePhoto(id).catch(() => null);
+                        if (photoBlobRef.current) URL.revokeObjectURL(photoBlobRef.current);
+                        if (blob) { const url = URL.createObjectURL(blob); photoBlobRef.current = url; setPhotoUrl(url); }
+                        else { photoBlobRef.current = null; setPhotoUrl(null); }
+                        addToast('success', 'Photo deleted');
+                      }}
+                      className="absolute top-1.5 right-1.5 bg-red-900/80 hover:bg-red-700 text-white text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {Object.keys(effectiveSpecs).length > 0 && (
@@ -2138,6 +2227,124 @@ export default function VehicleDetailPage() {
           </div>
         </form>
       </Modal>
+
+      {/* ── INSPECT ─────────────────────────────────────────────────────────────── */}
+      {activeTab === 'inspect' && (() => {
+        const categories = [...new Set(inspectionItems.map((i) => i.category))];
+        const allChecked = inspectionItems.length > 0 && inspectionItems.every((i) => i.last_checked_at);
+        const checkedCount = inspectionItems.filter((i) => i.last_checked_at).length;
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Pre-Trip Inspection</h2>
+                {inspectionItems.length > 0 && (
+                  <p className="text-slate-400 text-sm mt-0.5">{checkedCount} / {inspectionItems.length} checked</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {checkedCount > 0 && (
+                  <button onClick={async () => {
+                    if (!confirm('Reset all checks?')) return;
+                    await apiClient.resetInspection(id);
+                    loadInspection();
+                    addToast('success', 'Inspection reset');
+                  }} className="btn-secondary text-sm">Reset</button>
+                )}
+                {allChecked && (
+                  <span className="flex items-center gap-1.5 text-green-400 text-sm font-medium bg-green-900/20 border border-green-700/50 px-3 py-1.5 rounded">
+                    ✓ All clear
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            {inspectionItems.length > 0 && (
+              <div className="w-full bg-slate-700 rounded-full h-2">
+                <div
+                  className="bg-teal-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(checkedCount / inspectionItems.length) * 100}%` }}
+                />
+              </div>
+            )}
+
+            {categories.map((cat) => (
+              <div key={cat} className="card">
+                <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-3">{cat}</h3>
+                <div className="space-y-2">
+                  {inspectionItems.filter((i) => i.category === cat).map((item) => {
+                    const checked = !!item.last_checked_at;
+                    const checkedTime = item.last_checked_at
+                      ? new Date(item.last_checked_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                      : null;
+                    return (
+                      <div key={item.id} className="flex items-center justify-between gap-3">
+                        <button
+                          onClick={async () => {
+                            await apiClient.checkInspectionItem(id, item.id);
+                            loadInspection();
+                          }}
+                          className={`flex items-center gap-3 flex-1 text-left py-1 transition-colors group ${checked ? 'opacity-60' : ''}`}
+                        >
+                          <span className={`w-5 h-5 rounded flex-shrink-0 border-2 flex items-center justify-center transition-colors ${
+                            checked ? 'bg-teal-500 border-teal-500 text-white' : 'border-slate-500 group-hover:border-teal-400'
+                          }`}>
+                            {checked && <span className="text-xs">✓</span>}
+                          </span>
+                          <span className={`text-sm ${checked ? 'line-through text-slate-500' : 'text-white'}`}>{item.name}</span>
+                          {checkedTime && <span className="text-xs text-slate-500 ml-auto">{checkedTime}</span>}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await apiClient.deleteInspectionItem(id, item.id);
+                            loadInspection();
+                          }}
+                          className="text-slate-600 hover:text-red-400 text-xs transition-colors flex-shrink-0"
+                        >✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {/* Add custom item */}
+            <div className="card">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Add Custom Item</h3>
+              <div className="flex gap-2">
+                <input
+                  className="input-field flex-1 text-sm"
+                  placeholder="Item name (e.g. Winch cable)"
+                  value={newInspectName}
+                  onChange={(e) => setNewInspectName(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key !== 'Enter' || !newInspectName.trim()) return;
+                    await apiClient.createInspectionItem(id, { name: newInspectName.trim(), category: newInspectCat });
+                    setNewInspectName('');
+                    loadInspection();
+                  }}
+                />
+                <input
+                  className="input-field w-28 text-sm"
+                  placeholder="Category"
+                  value={newInspectCat}
+                  onChange={(e) => setNewInspectCat(e.target.value)}
+                />
+                <button
+                  onClick={async () => {
+                    if (!newInspectName.trim()) return;
+                    await apiClient.createInspectionItem(id, { name: newInspectName.trim(), category: newInspectCat });
+                    setNewInspectName('');
+                    loadInspection();
+                  }}
+                  className="btn-primary text-sm px-4"
+                >Add</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── ANALYTICS ───────────────────────────────────────────────────────────── */}
       {activeTab === 'analytics' && (

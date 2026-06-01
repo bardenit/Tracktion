@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from app.database import get_db
 from app.models import User, Vehicle, Document, VehicleCollaborator
-from app.schemas import DocumentResponse
+from app.schemas import DocumentResponse, VehiclePhotoResponse
 from app.auth import get_current_user
 from app.storage import get_storage, LocalStorage
 from app.data_config import DATA_DIR
@@ -103,7 +103,7 @@ def list_documents(
     _check_vehicle_access(vehicle_id, current_user.id, db)
     return (
         db.query(Document)
-        .filter(Document.vehicle_id == vehicle_id)
+        .filter(Document.vehicle_id == vehicle_id, Document.document_type != "vehicle_photo")
         .order_by(Document.uploaded_at.desc())
         .all()
     )
@@ -170,20 +170,6 @@ async def upload_vehicle_photo(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 20 MB)")
 
-    # Replace any existing photo
-    existing = (
-        db.query(Document)
-        .filter(Document.vehicle_id == vehicle_id, Document.document_type == 'vehicle_photo')
-        .first()
-    )
-    if existing:
-        try:
-            get_storage().delete(existing.storage_path)
-        except Exception:
-            pass
-        db.delete(existing)
-        db.flush()
-
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     safe_name = (file.filename or 'photo').replace(" ", "_")
     relative_path = f"user_{current_user.id}/vehicle_{vehicle_id}/photo_{timestamp}_{safe_name}"
@@ -199,6 +185,45 @@ async def upload_vehicle_photo(
     db.commit()
     db.refresh(doc)
     return {"id": doc.id, "filename": doc.filename}
+
+
+@router.get("/{vehicle_id}/photos", response_model=List[VehiclePhotoResponse])
+def list_vehicle_photos(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _check_vehicle_access(vehicle_id, current_user.id, db)
+    return (
+        db.query(Document)
+        .filter(Document.vehicle_id == vehicle_id, Document.document_type == "vehicle_photo")
+        .order_by(Document.uploaded_at.desc())
+        .all()
+    )
+
+
+@router.delete("/{vehicle_id}/photos/{photo_id}")
+def delete_vehicle_photo_by_id(
+    vehicle_id: int,
+    photo_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _check_vehicle_access(vehicle_id, current_user.id, db)
+    doc = db.query(Document).filter(
+        Document.id == photo_id,
+        Document.vehicle_id == vehicle_id,
+        Document.document_type == "vehicle_photo",
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    try:
+        get_storage().delete(doc.storage_path)
+    except Exception:
+        pass
+    db.delete(doc)
+    db.commit()
+    return {"message": "Photo deleted"}
 
 
 @router.get("/{vehicle_id}/photo")
