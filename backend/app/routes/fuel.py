@@ -193,6 +193,7 @@ def update_fuel_entry(
     entry.cost = entry_data.cost
     entry.location = entry_data.location
     entry.notes = entry_data.notes
+    entry.octane = entry_data.octane
     entry.mpg = mpg
     entry.cost_per_mile = cost_per_mile
     
