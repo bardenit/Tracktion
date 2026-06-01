@@ -222,8 +222,8 @@ def save_integrations_settings(s: IntegrationsSettings, current_user: User = Dep
     existing = config.get("integrations", {})
     config["integrations"] = {
         "anthropic_api_key": s.anthropic_api_key or existing.get("anthropic_api_key", ""),
-        "smartcar_client_id": s.smartcar_client_id or existing.get("smartcar_client_id", ""),
-        "smartcar_client_secret": s.smartcar_client_secret or existing.get("smartcar_client_secret", ""),
+        "smartcar_client_id": (s.smartcar_client_id or existing.get("smartcar_client_id", "")).strip(),
+        "smartcar_client_secret": (s.smartcar_client_secret or existing.get("smartcar_client_secret", "")).strip(),
     }
     save_config(config)
     return {"message": "Integration settings saved."}
