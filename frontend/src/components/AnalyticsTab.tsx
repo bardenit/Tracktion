@@ -3,7 +3,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 
-interface FuelEntry { id: number; date: string; mileage: number; gallons: number; cost: number; mpg?: number; octane?: number; }
+interface FuelEntry { id: number; date: string; mileage: number; gallons: number; cost: number; mpg?: number; cost_per_mile?: number; octane?: number; }
 interface MaintenanceEntry { id: number; date: string; cost: number; type: string; }
 interface Expense { id: number; date: string; amount: number; category: string; }
 interface TripEntry { id: number; date: string; miles: number; destination?: string; }
@@ -99,6 +99,13 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
   const odometerData = [...fuelEntries]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((e) => ({ date: e.date.slice(5), mileage: Math.round(e.mileage) }));
+
+  // ── Cost per mile trend ───────────────────────────────────────────────────────
+
+  const costPerMileData = [...fuelEntries]
+    .filter((e) => e.cost_per_mile != null)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((e) => ({ date: e.date.slice(5), cpm: Number(Number(e.cost_per_mile).toFixed(4)) }));
 
   // ── Octane trend (gasoline vehicles only) ─────────────────────────────────────
 
@@ -254,6 +261,18 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
             <YAxis tick={AXIS} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
             <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v.toLocaleString()} mi`, 'Odometer']} />
             <Line type="monotone" dataKey="mileage" stroke={INDIGO} strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <ChartCard title="Cost per Mile" empty={costPerMileData.length < 2}>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={costPerMileData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+            <XAxis dataKey="date" tick={AXIS} />
+            <YAxis tick={AXIS} tickFormatter={(v) => `$${v.toFixed(2)}`} />
+            <Tooltip {...tooltipStyle} formatter={(v: number) => [`$${v.toFixed(4)}/mi`, 'Cost per Mile']} />
+            <Line type="monotone" dataKey="cpm" stroke={RED} strokeWidth={2} dot={{ r: 3, fill: RED }} activeDot={{ r: 5 }} />
           </LineChart>
         </ResponsiveContainer>
       </ChartCard>

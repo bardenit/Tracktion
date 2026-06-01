@@ -133,7 +133,8 @@ def update_expense(
     expense.amount = expense_data.amount
     expense.date = expense_data.date
     expense.description = expense_data.description
-    
+    expense.expires_on = expense_data.expires_on
+
     db.commit()
     db.refresh(expense)
     

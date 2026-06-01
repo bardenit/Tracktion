@@ -77,14 +77,16 @@ def create_fuel_entry(
         cost=entry_data.cost,
         location=entry_data.location,
         notes=entry_data.notes,
+        octane=entry_data.octane,
         mpg=mpg,
         cost_per_mile=cost_per_mile,
     )
-    
+
     db.add(entry)
-    
-    # Update vehicle's current mileage
-    vehicle.current_mileage = entry_data.mileage
+
+    # Update vehicle's current mileage if this fill-up is higher
+    if entry_data.mileage > vehicle.current_mileage:
+        vehicle.current_mileage = entry_data.mileage
     
     db.commit()
     db.refresh(entry)
@@ -196,7 +198,10 @@ def update_fuel_entry(
     entry.octane = entry_data.octane
     entry.mpg = mpg
     entry.cost_per_mile = cost_per_mile
-    
+
+    if entry_data.mileage > vehicle.current_mileage:
+        vehicle.current_mileage = entry_data.mileage
+
     db.commit()
     db.refresh(entry)
     

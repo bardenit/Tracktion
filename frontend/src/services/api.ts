@@ -419,6 +419,11 @@ class ApiClient {
     return response.data;
   }
 
+  async updateExpense(vehicleId: number, expenseId: number, expenseData: any) {
+    const response = await this.client.put(`/expenses/${vehicleId}/entries/${expenseId}`, expenseData);
+    return response.data;
+  }
+
   async deleteExpense(vehicleId: number, expenseId: number) {
     const response = await this.client.delete(`/expenses/${vehicleId}/entries/${expenseId}`);
     return response.data;

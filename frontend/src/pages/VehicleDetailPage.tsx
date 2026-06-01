@@ -139,6 +139,25 @@ function downloadCSV(rows: Record<string, unknown>[], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+  return lines.slice(1).map((line) => {
+    const cols: string[] = [];
+    let cur = ''; let inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { cols.push(cur); cur = ''; }
+      else { cur += ch; }
+    }
+    cols.push(cur);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = (cols[i] ?? '').trim(); });
+    return row;
+  }).filter((r) => Object.values(r).some((v) => v !== ''));
+}
+
 function fmtDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
@@ -442,6 +461,11 @@ export default function VehicleDetailPage() {
   const [editFuel, setEditFuel] = useState<FuelEntry | null>(null);
   const [editMaint, setEditMaint] = useState<MaintenanceEntry | null>(null);
   const [editPart, setEditPart] = useState<VehiclePart | null>(null);
+  const [editExpense, setEditExpense] = useState<Expense | null>(null);
+
+  // Search/filter
+  const [fuelSearch, setFuelSearch] = useState('');
+  const [maintSearch, setMaintSearch] = useState('');
 
   // Parts state
   const [parts, setParts] = useState<VehiclePart[]>([]);
@@ -774,7 +798,16 @@ export default function VehicleDetailPage() {
   // ─── Expense handlers ────────────────────────────────────────────────────────
 
   const openExpenseAdd = () => {
+    setEditExpense(null);
     setExpenseForm({ category: 'insurance', amount: 0, date: today(), description: '', expires_on: '' });
+    setFormError('');
+    setExpenseCatsOpen(false);
+    setExpenseModal(true);
+  };
+
+  const openExpenseEdit = (e: Expense) => {
+    setEditExpense(e);
+    setExpenseForm({ category: e.category, amount: e.amount, date: e.date, description: e.description, expires_on: e.expires_on || '' });
     setFormError('');
     setExpenseCatsOpen(false);
     setExpenseModal(true);
@@ -785,14 +818,16 @@ export default function VehicleDetailPage() {
     setSaving(true);
     setFormError('');
     try {
-      await apiClient.createExpense(id, {
-        ...expenseForm,
-        amount: Number(expenseForm.amount),
-        expires_on: expenseForm.expires_on || undefined,
-      });
+      const payload = { ...expenseForm, amount: Number(expenseForm.amount), expires_on: expenseForm.expires_on || undefined };
+      if (editExpense) {
+        await apiClient.updateExpense(id, editExpense.id, payload);
+        addToast('success', 'Expense updated');
+      } else {
+        await apiClient.createExpense(id, payload);
+        addToast('success', 'Expense added');
+      }
       setExpenseModal(false);
       loadExpenses().catch(console.error);
-      addToast('success', 'Expense added');
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Failed to save');
     } finally {
@@ -1345,7 +1380,27 @@ export default function VehicleDetailPage() {
             <h2 className="text-lg font-semibold text-white">Fuel History</h2>
             <div className="flex gap-2">
               {fuelEntries.length > 0 && (
-                <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, mpg: e.mpg ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                <>
+                  <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, mpg: e.mpg ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                  <label className="btn-secondary text-sm cursor-pointer">
+                    Import CSV
+                    <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
+                      const file = ev.target.files?.[0]; ev.target.value = '';
+                      if (!file) return;
+                      const text = await file.text();
+                      const rows = parseCSV(text);
+                      let ok = 0; let fail = 0;
+                      for (const r of rows) {
+                        try {
+                          await apiClient.createFuelEntry(id, { date: r.date, mileage: Number(r.mileage), gallons: Number(r.gallons), cost: Number(r.cost), location: r.location || undefined, notes: r.notes || undefined, octane: r.octane ? Number(r.octane) : undefined });
+                          ok++;
+                        } catch { fail++; }
+                      }
+                      loadFuel().catch(console.error);
+                      addToast(fail === 0 ? 'success' : 'error', `Imported ${ok} entries${fail ? `, ${fail} failed` : ''}`);
+                    }} />
+                  </label>
+                </>
               )}
               <button onClick={openFuelAdd} className="btn-primary text-sm">+ Log Fill-up</button>
             </div>
@@ -1388,6 +1443,14 @@ export default function VehicleDetailPage() {
               <p className="text-slate-400">No fuel entries yet.</p>
             </div>
           ) : (
+            <>
+              <input
+                type="text"
+                placeholder="Search by location or notes..."
+                className="input-field text-sm"
+                value={fuelSearch}
+                onChange={(e) => setFuelSearch(e.target.value)}
+              />
             <div className="overflow-x-auto rounded-lg border border-slate-700">
               <table className="w-full text-sm">
                 <thead className="bg-slate-800/80">
@@ -1396,6 +1459,7 @@ export default function VehicleDetailPage() {
                     <th className="px-4 py-3 font-medium">Mileage</th>
                     <th className="px-4 py-3 font-medium">Gallons</th>
                     <th className="px-4 py-3 font-medium">Cost</th>
+                    <th className="px-4 py-3 font-medium">$/gal</th>
                     <th className="px-4 py-3 font-medium">MPG</th>
                     {vehicle.fuel_type !== 'diesel' && vehicle.fuel_type !== 'electric' && <th className="px-4 py-3 font-medium">Octane</th>}
                     <th className="px-4 py-3 font-medium">Location</th>
@@ -1403,12 +1467,13 @@ export default function VehicleDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {fuelEntries.map((e) => (
+                  {fuelEntries.filter((e) => !fuelSearch || [e.location, e.notes, e.date].some((f) => f?.toLowerCase().includes(fuelSearch.toLowerCase()))).map((e) => (
                     <tr key={e.id} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
                       <td className="px-4 py-3 text-slate-300">{fmtDate(e.date)}</td>
                       <td className="px-4 py-3 text-slate-300">{e.mileage.toLocaleString()}</td>
                       <td className="px-4 py-3 text-slate-300">{Number(e.gallons).toFixed(3)}</td>
                       <td className="px-4 py-3 text-slate-300">${Number(e.cost).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-slate-400">${(e.cost / e.gallons).toFixed(3)}</td>
                       <td className="px-4 py-3 text-slate-300">
                         {e.mpg != null ? Number(e.mpg).toFixed(1) : '—'}
                       </td>
@@ -1437,6 +1502,7 @@ export default function VehicleDetailPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
 
           <Modal isOpen={fuelModal} onClose={() => setFuelModal(false)} title={editFuel ? 'Edit Fuel Entry' : 'Log Fill-up'}>
@@ -1619,7 +1685,27 @@ export default function VehicleDetailPage() {
               <h2 className="text-lg font-semibold text-white">Service History</h2>
               <div className="flex gap-2">
                 {maintEntries.length > 0 && (
-                  <button onClick={() => downloadCSV(maintEntries.map((e) => ({ date: e.date, type: e.type, mileage: e.mileage, cost: e.cost, provider: e.service_provider ?? '', notes: e.notes ?? '' })), 'maintenance-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                  <>
+                    <button onClick={() => downloadCSV(maintEntries.map((e) => ({ date: e.date, type: e.type, mileage: e.mileage, cost: e.cost, provider: e.service_provider ?? '', notes: e.notes ?? '' })), 'maintenance-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                    <label className="btn-secondary text-sm cursor-pointer">
+                      Import CSV
+                      <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
+                        const file = ev.target.files?.[0]; ev.target.value = '';
+                        if (!file) return;
+                        const text = await file.text();
+                        const rows = parseCSV(text);
+                        let ok = 0; let fail = 0;
+                        for (const r of rows) {
+                          try {
+                            await apiClient.createMaintenanceEntry(id, { date: r.date, mileage: Number(r.mileage), type: r.type, cost: Number(r.cost), service_provider: r.provider || r.service_provider || undefined, notes: r.notes || undefined });
+                            ok++;
+                          } catch { fail++; }
+                        }
+                        loadMaintenance().catch(console.error);
+                        addToast(fail === 0 ? 'success' : 'error', `Imported ${ok} entries${fail ? `, ${fail} failed` : ''}`);
+                      }} />
+                    </label>
+                  </>
                 )}
                 <button onClick={openMaintAdd} className="btn-primary text-sm">+ Log Service</button>
               </div>
@@ -1629,6 +1715,14 @@ export default function VehicleDetailPage() {
                 <p className="text-slate-400">No service records yet.</p>
               </div>
             ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="Search by service type or provider..."
+                  className="input-field text-sm mb-3"
+                  value={maintSearch}
+                  onChange={(e) => setMaintSearch(e.target.value)}
+                />
               <div className="overflow-x-auto rounded-lg border border-slate-700">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-800/80">
@@ -1642,7 +1736,7 @@ export default function VehicleDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {maintEntries.map((e) => (
+                    {maintEntries.filter((e) => !maintSearch || [e.type, e.service_provider, e.notes, e.date].some((f) => f?.toLowerCase().includes(maintSearch.toLowerCase()))).map((e) => (
                       <tr key={e.id} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
                         <td className="px-4 py-3 text-slate-300">{fmtDate(e.date)}</td>
                         <td className="px-4 py-3 text-white">{e.type}</td>
@@ -1670,6 +1764,7 @@ export default function VehicleDetailPage() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
 
@@ -1871,7 +1966,27 @@ export default function VehicleDetailPage() {
             <h2 className="text-lg font-semibold text-white">Expenses</h2>
             <div className="flex gap-2">
               {expenses.length > 0 && (
-                <button onClick={() => downloadCSV(expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, amount: e.amount, expires_on: e.expires_on ?? '' })), 'expenses.csv')} className="btn-secondary text-sm">Export CSV</button>
+                <>
+                  <button onClick={() => downloadCSV(expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, amount: e.amount, expires_on: e.expires_on ?? '' })), 'expenses.csv')} className="btn-secondary text-sm">Export CSV</button>
+                  <label className="btn-secondary text-sm cursor-pointer">
+                    Import CSV
+                    <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
+                      const file = ev.target.files?.[0]; ev.target.value = '';
+                      if (!file) return;
+                      const text = await file.text();
+                      const rows = parseCSV(text);
+                      let ok = 0; let fail = 0;
+                      for (const r of rows) {
+                        try {
+                          await apiClient.createExpense(id, { date: r.date, category: r.category || 'other', description: r.description, amount: Number(r.amount), expires_on: r.expires_on || undefined });
+                          ok++;
+                        } catch { fail++; }
+                      }
+                      loadExpenses().catch(console.error);
+                      addToast(fail === 0 ? 'success' : 'error', `Imported ${ok} entries${fail ? `, ${fail} failed` : ''}`);
+                    }} />
+                  </label>
+                </>
               )}
               <button onClick={openExpenseAdd} className="btn-primary text-sm">+ Add Expense</button>
             </div>
@@ -1920,12 +2035,20 @@ export default function VehicleDetailPage() {
                           ) : <span className="text-slate-600">—</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            onClick={() => deleteExpense(e.id)}
-                            className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-                          >
-                            Del
-                          </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => openExpenseEdit(e)}
+                              className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteExpense(e.id)}
+                              className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+                            >
+                              Del
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       );
@@ -1948,7 +2071,7 @@ export default function VehicleDetailPage() {
             </>
           )}
 
-          <Modal isOpen={expenseModal} onClose={() => setExpenseModal(false)} title="Add Expense">
+          <Modal isOpen={expenseModal} onClose={() => setExpenseModal(false)} title={editExpense ? 'Edit Expense' : 'Add Expense'}>
             <form onSubmit={saveExpense} className="space-y-4">
               <div className="flex items-center justify-between">
                 <FormError msg={formError} />

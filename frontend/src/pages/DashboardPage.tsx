@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import VehiclePhoto from '../components/VehiclePhoto';
@@ -47,6 +47,8 @@ interface Reminder {
   next_due_mileage?: number;
   next_due_date?: string;
   reminder_miles?: number;
+  interval_miles?: number;
+  interval_days?: number;
 }
 
 interface Expense {
@@ -78,6 +80,10 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [markDoneReminder, setMarkDoneReminder] = useState<Reminder | null>(null);
+  const [markDoneForm, setMarkDoneForm] = useState({ date: '', mileage: 0, cost: 0, notes: '' });
+  const [markDoneSaving, setMarkDoneSaving] = useState(false);
+  const markDoneRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     apiClient
@@ -179,6 +185,46 @@ export default function DashboardPage() {
   const selectedVehicle = vehicles.find((v) => v.id === selectedId);
   const isTrailer = selectedVehicle?.vehicle_type === 'trailer';
   const totalCost = (isTrailer ? 0 : (fuelStats?.total_spent ?? 0)) + (maintenanceStats?.total_cost ?? 0);
+
+  const openMarkDone = (r: Reminder) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    setMarkDoneReminder(r);
+    setMarkDoneForm({ date: todayStr, mileage: selectedVehicle?.current_mileage ?? 0, cost: 0, notes: '' });
+    markDoneRef.current?.showModal();
+  };
+
+  const saveMarkDone = async () => {
+    if (!markDoneReminder || !selectedId) return;
+    setMarkDoneSaving(true);
+    try {
+      await apiClient.createMaintenanceEntry(selectedId, {
+        date: markDoneForm.date,
+        mileage: markDoneForm.mileage,
+        type: markDoneReminder.service_type,
+        cost: markDoneForm.cost,
+        notes: markDoneForm.notes || undefined,
+      });
+      const todayStr = markDoneForm.date;
+      const update: Record<string, unknown> = {
+        last_performed_mileage: markDoneForm.mileage,
+        last_performed_date: todayStr,
+      };
+      if (markDoneReminder.interval_miles) update.next_due_mileage = markDoneForm.mileage + markDoneReminder.interval_miles;
+      if (markDoneReminder.interval_days) {
+        const d = new Date(todayStr + 'T00:00:00');
+        d.setDate(d.getDate() + markDoneReminder.interval_days);
+        update.next_due_date = d.toISOString().split('T')[0];
+      }
+      await apiClient.updateMaintenanceReminder(selectedId, markDoneReminder.id, update);
+      apiClient.listMaintenanceReminders(selectedId).then(setReminders).catch(console.error);
+      markDoneRef.current?.close();
+      setMarkDoneReminder(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setMarkDoneSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -292,28 +338,37 @@ export default function DashboardPage() {
           const daysLeft = Math.ceil((new Date(e.expires_on + 'T00:00:00').getTime() - Date.now()) / 86400000);
           return daysLeft <= 30;
         });
-        const alerts = [
-          ...overdueReminders.map((r) => ({ level: 'red' as const, text: `${r.service_type} is overdue`, tab: 'maintenance' })),
-          ...upcomingReminders.map((r) => ({ level: 'amber' as const, text: `${r.service_type} coming up soon`, tab: 'maintenance' })),
-          ...expiringExpenses.map((e) => {
-            const days = Math.ceil((new Date(e.expires_on! + 'T00:00:00').getTime() - Date.now()) / 86400000);
-            return { level: days < 0 ? 'red' as const : 'amber' as const, text: days < 0 ? `${e.description} has expired` : `${e.description} expires in ${days} day${days === 1 ? '' : 's'}`, tab: 'expenses' };
-          }),
+        const reminderAlerts = [
+          ...overdueReminders.map((r) => ({ level: 'red' as const, text: `${r.service_type} is overdue`, tab: 'maintenance', reminder: r as Reminder | null })),
+          ...upcomingReminders.map((r) => ({ level: 'amber' as const, text: `${r.service_type} coming up soon`, tab: 'maintenance', reminder: r as Reminder | null })),
         ];
+        const expenseAlerts = expiringExpenses.map((e) => {
+          const days = Math.ceil((new Date(e.expires_on! + 'T00:00:00').getTime() - Date.now()) / 86400000);
+          return { level: days < 0 ? 'red' as const : 'amber' as const, text: days < 0 ? `${e.description} has expired` : `${e.description} expires in ${days} day${days === 1 ? '' : 's'}`, tab: 'expenses', reminder: null as Reminder | null };
+        });
+        const alerts = [...reminderAlerts, ...expenseAlerts];
         if (alerts.length === 0) return null;
         return (
           <div className="space-y-2">
             {alerts.map((a, i) => (
-              <button key={i} onClick={() => navigate(`/vehicles/${selectedId}?tab=${a.tab}`)}
-                className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border text-sm transition-colors ${
+              <div key={i} className={`flex items-center gap-2 px-4 py-3 rounded-lg border text-sm ${
                   a.level === 'red'
-                    ? 'bg-red-900/20 border-red-700/50 text-red-300 hover:bg-red-900/30'
-                    : 'bg-amber-900/20 border-amber-700/50 text-amber-300 hover:bg-amber-900/30'
+                    ? 'bg-red-900/20 border-red-700/50 text-red-300'
+                    : 'bg-amber-900/20 border-amber-700/50 text-amber-300'
                 }`}>
                 <span className="flex-shrink-0">{a.level === 'red' ? '⚠' : '!'}</span>
-                <span>{a.text}</span>
-                <span className="ml-auto text-xs opacity-60">View →</span>
-              </button>
+                <span className="flex-1">{a.text}</span>
+                {a.reminder && (
+                  <button onClick={() => openMarkDone(a.reminder!)}
+                    className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded transition-colors flex-shrink-0">
+                    Mark Done
+                  </button>
+                )}
+                <button onClick={() => navigate(`/vehicles/${selectedId}?tab=${a.tab}`)}
+                  className="text-xs opacity-60 hover:opacity-100 transition-opacity flex-shrink-0">
+                  View →
+                </button>
+              </div>
             ))}
           </div>
         );
@@ -392,6 +447,42 @@ export default function DashboardPage() {
           </ul>
         )}
       </div>
+
+      {/* Mark Done dialog */}
+      <dialog ref={markDoneRef} className="rounded-xl bg-slate-800 border border-slate-700 p-6 w-full max-w-sm shadow-xl text-white backdrop:bg-black/60" onClose={() => setMarkDoneReminder(null)}>
+        {markDoneReminder && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Mark Done — {markDoneReminder.service_type}</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Date *</label>
+                <input type="date" className="input-field" value={markDoneForm.date}
+                  onChange={(e) => setMarkDoneForm((p) => ({ ...p, date: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
+                <input type="number" className="input-field" min="0" value={markDoneForm.mileage}
+                  onChange={(e) => setMarkDoneForm((p) => ({ ...p, mileage: Number(e.target.value) }))} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Cost ($)</label>
+              <input type="number" className="input-field" min="0" step="0.01" value={markDoneForm.cost}
+                onChange={(e) => setMarkDoneForm((p) => ({ ...p, cost: Number(e.target.value) }))} />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Notes</label>
+              <input className="input-field" value={markDoneForm.notes}
+                onChange={(e) => setMarkDoneForm((p) => ({ ...p, notes: e.target.value }))} />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={saveMarkDone} disabled={markDoneSaving}
+                className="btn-primary flex-1">{markDoneSaving ? 'Saving...' : 'Save'}</button>
+              <button onClick={() => markDoneRef.current?.close()} className="btn-secondary flex-1">Cancel</button>
+            </div>
+          </div>
+        )}
+      </dialog>
     </div>
   );
 }
