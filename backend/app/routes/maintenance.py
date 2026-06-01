@@ -295,7 +295,24 @@ def list_maintenance_reminders(
         .filter(MaintenanceReminder.vehicle_id == vehicle_id)
         .all()
     )
-    
+
+    from datetime import date as date_type
+    today = date_type.today()
+    changed = False
+    for r in reminders:
+        overdue = False
+        if r.next_due_mileage and vehicle.current_mileage >= r.next_due_mileage:
+            overdue = True
+        if r.next_due_date and today >= r.next_due_date:
+            overdue = True
+        if r.target_mileage and vehicle.current_mileage >= r.target_mileage:
+            overdue = True
+        if r.is_overdue != overdue:
+            r.is_overdue = overdue
+            changed = True
+    if changed:
+        db.commit()
+
     return reminders
 
 

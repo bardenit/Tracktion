@@ -803,6 +803,11 @@ export default function VehicleDetailPage() {
     if (r.is_overdue) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
     if (!r.next_due_mileage && !r.next_due_date && !r.target_mileage)
       return { color: 'text-slate-400', bg: 'bg-slate-800/50', label: 'Pending' };
+    if (r.next_due_date) {
+      const daysLeft = Math.ceil((new Date(r.next_due_date + 'T00:00:00').getTime() - Date.now()) / 86400000);
+      if (daysLeft <= 0) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
+      if (daysLeft <= 14) return { color: 'text-amber-400', bg: 'bg-amber-900/30', label: `${daysLeft}d left` };
+    }
     if (r.next_due_mileage && vehicle) {
       const remaining = r.next_due_mileage - vehicle.current_mileage;
       if (remaining <= 0) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
@@ -1468,12 +1473,17 @@ export default function VehicleDetailPage() {
                                   r.interval_days ? `Every ${r.interval_days} days` : '',
                                 ].filter(Boolean).join(' · ')}
                           </p>
+                          {r.next_due_date && (
+                            <p className="text-slate-400 text-xs mt-0.5">
+                              Due {fmtDate(r.next_due_date)}
+                            </p>
+                          )}
                           {r.next_due_mileage ? (
                             <p className="text-slate-400 text-xs mt-0.5">
                               Due at {r.next_due_mileage.toLocaleString()} mi
                               {r.reminder_miles ? ` · alert at ${(r.next_due_mileage - r.reminder_miles).toLocaleString()} mi` : ''}
                             </p>
-                          ) : !r.target_mileage && (
+                          ) : !r.target_mileage && !r.next_due_date && (
                             <button
                               type="button"
                               onClick={() => startReminderNow(r)}

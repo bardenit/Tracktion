@@ -93,6 +93,12 @@ export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEnt
 
   const monthlyMaintCost = aggregateByMonth(maintEntries, (e) => e.cost);
 
+  // ── Odometer history (vehicles) ───────────────────────────────────────────────
+
+  const odometerData = [...fuelEntries]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((e) => ({ date: e.date.slice(5), mileage: Math.round(e.mileage) }));
+
   // ── Trailer charts ────────────────────────────────────────────────────────────
 
   const monthlyMiles = aggregateByMonth(tripEntries, (e) => e.miles);
@@ -106,6 +112,12 @@ export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEnt
     return Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => ({ month: fmtMonth(k), value: v }));
+  })();
+
+  const cumulativeMilesData = (() => {
+    const sorted = [...tripEntries].sort((a, b) => a.date.localeCompare(b.date));
+    let total = 0;
+    return sorted.map((t) => { total += t.miles; return { date: t.date.slice(5), total: Math.round(total) }; });
   })();
 
   if (isTrailer) {
@@ -144,6 +156,18 @@ export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEnt
               <Tooltip {...tooltipStyle} formatter={(v: number) => [`$${v.toFixed(2)}`, 'Cost']} />
               <Bar dataKey="value" fill={AMBER} radius={[3, 3, 0, 0]} />
             </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Cumulative Miles Hauled" empty={cumulativeMilesData.length < 2}>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={cumulativeMilesData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+              <XAxis dataKey="date" tick={AXIS} />
+              <YAxis tick={AXIS} />
+              <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v.toLocaleString()} mi`, 'Total Miles']} />
+              <Line type="monotone" dataKey="total" stroke={BLUE} strokeWidth={2} dot={false} />
+            </LineChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
@@ -211,6 +235,18 @@ export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEnt
             <Tooltip {...tooltipStyle} formatter={(v: number) => [`$${v.toFixed(2)}`, 'Cost']} />
             <Bar dataKey="value" fill={AMBER} radius={[3, 3, 0, 0]} />
           </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <ChartCard title="Odometer History" empty={odometerData.length < 2}>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={odometerData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+            <XAxis dataKey="date" tick={AXIS} />
+            <YAxis tick={AXIS} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+            <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v.toLocaleString()} mi`, 'Odometer']} />
+            <Line type="monotone" dataKey="mileage" stroke={INDIGO} strokeWidth={2} dot={false} />
+          </LineChart>
         </ResponsiveContainer>
       </ChartCard>
     </div>
