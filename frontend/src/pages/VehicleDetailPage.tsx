@@ -53,6 +53,7 @@ interface FuelEntry {
   notes?: string;
   octane?: number;
   mpg?: number;
+  cost_per_mile?: number;
 }
 
 interface MaintenanceEntry {
@@ -1419,15 +1420,25 @@ export default function VehicleDetailPage() {
               }
               if (totalGal > 0) effectiveOctane = (weightedSum / totalGal).toFixed(1);
             }
+            const recentCpm = fuelEntries
+              .slice()
+              .sort((a, b) => b.date.localeCompare(a.date))
+              .filter((e) => e.cost_per_mile != null)
+              .slice(0, 4);
+            const avgCpm = recentCpm.length > 0
+              ? recentCpm.reduce((s, e) => s + e.cost_per_mile!, 0) / recentCpm.length
+              : null;
             const stats = [
               { label: 'Avg MPG', value: fuelStats.average_mpg != null ? Number(fuelStats.average_mpg).toFixed(1) : '—' },
               { label: 'Total Spent', value: `$${Number(fuelStats.total_spent).toFixed(2)}` },
               { label: 'Total Gallons', value: Number(fuelStats.total_gallons).toFixed(1) },
               { label: 'Fill-ups', value: fuelStats.entries_count },
+              ...(avgCpm != null ? [{ label: `¢/mi (last ${recentCpm.length})`, value: `${(avgCpm * 100).toFixed(1)}¢` }] : []),
               ...(effectiveOctane ? [{ label: 'Eff. Octane', value: effectiveOctane }] : []),
             ];
+            const cols = stats.length <= 4 ? 'grid-cols-2 sm:grid-cols-4' : stats.length === 5 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-3 sm:grid-cols-6';
             return (
-              <div className={`grid gap-3 ${stats.length === 5 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
+              <div className={`grid gap-3 ${cols}`}>
                 {stats.map(({ label, value }) => (
                   <div key={label} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
                     <p className="text-slate-400 text-xs">{label}</p>
