@@ -9,29 +9,39 @@ function resizeImageForUpload(
   filename: string,
 ): Promise<File> {
   if (!file.type.startsWith('image/')) return Promise.resolve(file);
-  return new Promise((resolve, reject) => {
+
+  const resize = new Promise<File>((resolve, reject) => {
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
-      canvas.toBlob(
-        (blob) => blob
-          ? resolve(new File([blob], filename, { type: 'image/jpeg' }))
-          : reject(new Error('Canvas resize failed')),
-        'image/jpeg',
-        quality,
-      );
+      try {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('No 2d context')); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => blob
+            ? resolve(new File([blob], filename, { type: 'image/jpeg' }))
+            : reject(new Error('toBlob returned null')),
+          'image/jpeg',
+          quality,
+        );
+      } catch (err) {
+        reject(err);
+      }
     };
-    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image load failed')); };
     img.src = objectUrl;
   });
+
+  // Fall back to the original file if resize hangs or fails
+  return resize.catch(() => file);
 }
 
 class ApiClient {
