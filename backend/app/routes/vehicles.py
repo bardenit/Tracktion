@@ -44,12 +44,16 @@ async def create_vehicle(
     # Create vehicle
     vehicle = Vehicle(
         user_id=current_user.id,
+        nickname=vehicle_data.nickname,
+        vehicle_type=vehicle_data.vehicle_type,
         make=vehicle_data.make,
         model=vehicle_data.model,
         year=vehicle_data.year,
         vin=vehicle_data.vin,
+        license_plate=vehicle_data.license_plate,
         current_mileage=vehicle_data.current_mileage,
         fuel_type=vehicle_data.fuel_type,
+        axle_count=vehicle_data.axle_count,
         nhtsa_data=nhtsa_data,
     )
     
