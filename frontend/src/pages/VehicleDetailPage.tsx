@@ -151,6 +151,56 @@ function ScanReceiptButton({ onScan }: { onScan: (file: File) => Promise<void> }
   );
 }
 
+function VehicleTypeRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const addToast = useToastStore((state) => state.addToast);
+
+  const toggle = async () => {
+    const newType = vehicle.vehicle_type === 'trailer' ? 'vehicle' : 'trailer';
+    setSaving(true);
+    try {
+      const updated = await apiClient.updateVehicle(vehicle.id, { vehicle_type: newType });
+      onUpdate(updated);
+      setEditing(false);
+      addToast('success', `Changed to ${newType}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex justify-between text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+        <span className="text-slate-400">Type</span>
+        <button
+          onClick={() => setEditing(true)}
+          className="text-white font-mono hover:text-teal-400 transition-colors group flex items-center gap-1 capitalize"
+        >
+          {vehicle.vehicle_type}
+          <span className="text-slate-500 group-hover:text-teal-400 text-xs">✎</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-2">
+      <span className="text-slate-400">Type</span>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={toggle}
+          disabled={saving}
+          className="px-3 py-0.5 rounded border border-teal-500 bg-teal-900/30 text-teal-300 text-xs font-medium disabled:opacity-50"
+        >
+          {saving ? '...' : `Switch to ${vehicle.vehicle_type === 'trailer' ? 'Vehicle' : 'Trailer'}`}
+        </button>
+        <button onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      </div>
+    </div>
+  );
+}
+
 function LicensePlateRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(vehicle.license_plate || '');
@@ -897,6 +947,7 @@ export default function VehicleDetailPage() {
 
           <div className="card space-y-3">
             <h2 className="font-semibold text-white">Vehicle Info</h2>
+            <VehicleTypeRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
             {(
               [
                 ['Year', vehicle.year],
