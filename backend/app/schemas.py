@@ -54,6 +54,7 @@ class VehicleUpdate(BaseModel):
     current_mileage: Optional[float] = None
     fuel_type: Optional[str] = None
     axle_count: Optional[int] = None
+    tank_size_gallons: Optional[float] = None
     specs_overrides: Optional[dict] = None
 
 
@@ -99,6 +100,7 @@ class VehicleResponse(BaseModel):
     current_mileage: float
     fuel_type: str
     axle_count: Optional[int] = None
+    tank_size_gallons: Optional[float] = None
     nhtsa_data: Optional[dict] = None
     specs_overrides: Optional[dict] = None
     created_at: datetime
@@ -148,6 +150,7 @@ class FuelEntryCreate(BaseModel):
     cost: float
     location: Optional[str] = None
     notes: Optional[str] = None
+    octane: Optional[int] = None
 
 
 class FuelEntryResponse(BaseModel):
@@ -159,6 +162,7 @@ class FuelEntryResponse(BaseModel):
     cost: float
     location: Optional[str]
     notes: Optional[str]
+    octane: Optional[int] = None
     mpg: Optional[float]
     cost_per_mile: Optional[float]
     created_at: datetime

@@ -3,13 +3,14 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 
-interface FuelEntry { id: number; date: string; mileage: number; gallons: number; cost: number; mpg?: number; }
+interface FuelEntry { id: number; date: string; mileage: number; gallons: number; cost: number; mpg?: number; octane?: number; }
 interface MaintenanceEntry { id: number; date: string; cost: number; type: string; }
 interface Expense { id: number; date: string; amount: number; category: string; }
 interface TripEntry { id: number; date: string; miles: number; destination?: string; }
 
 interface Props {
   isTrailer: boolean;
+  isGasoline: boolean;
   loading: boolean;
   fuelEntries: FuelEntry[];
   maintEntries: MaintenanceEntry[];
@@ -68,7 +69,7 @@ const tooltipStyle = {
   itemStyle: { color: '#f1f5f9' },
 };
 
-export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEntries, expenses, tripEntries }: Props) {
+export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntries, maintEntries, expenses, tripEntries }: Props) {
   if (loading) {
     return <div className="text-slate-400 text-center py-16">Loading analytics...</div>;
   }
@@ -98,6 +99,13 @@ export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEnt
   const odometerData = [...fuelEntries]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((e) => ({ date: e.date.slice(5), mileage: Math.round(e.mileage) }));
+
+  // ── Octane trend (gasoline vehicles only) ─────────────────────────────────────
+
+  const octaneData = [...fuelEntries]
+    .filter((e) => e.octane != null)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((e) => ({ date: e.date.slice(5), octane: e.octane! }));
 
   // ── Trailer charts ────────────────────────────────────────────────────────────
 
@@ -249,6 +257,20 @@ export default function AnalyticsTab({ isTrailer, loading, fuelEntries, maintEnt
           </LineChart>
         </ResponsiveContainer>
       </ChartCard>
+
+      {isGasoline && (
+        <ChartCard title="Octane Grade per Fill-up" empty={octaneData.length < 2}>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={octaneData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+              <XAxis dataKey="date" tick={AXIS} />
+              <YAxis tick={AXIS} domain={[85, 'auto']} />
+              <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v}`, 'Octane']} />
+              <Line type="stepAfter" dataKey="octane" stroke={AMBER} strokeWidth={2} dot={{ r: 3, fill: AMBER }} activeDot={{ r: 5 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
     </div>
   );
 }

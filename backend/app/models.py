@@ -42,6 +42,7 @@ class Vehicle(Base):
     current_mileage = Column(Float, default=0)
     fuel_type = Column(String(50), default=FuelType.GASOLINE)
     axle_count = Column(Integer, nullable=True)
+    tank_size_gallons = Column(Float, nullable=True)
     nhtsa_data = Column(JSON, nullable=True)
     specs_overrides = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -83,6 +84,7 @@ class FuelEntry(Base):
     cost = Column(Float)
     location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
+    octane = Column(Integer, nullable=True)
     mpg = Column(Float, nullable=True)  # Calculated
     cost_per_mile = Column(Float, nullable=True)  # Calculated
     created_at = Column(DateTime, server_default=func.now())

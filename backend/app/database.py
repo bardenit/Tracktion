@@ -36,6 +36,8 @@ def run_migrations():
         "ALTER TABLE vehicles ADD COLUMN license_plate VARCHAR(20)",
         "ALTER TABLE expenses ADD COLUMN expires_on DATE",
         "ALTER TABLE vehicle_parts ADD COLUMN needs_order BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE fuel_entries ADD COLUMN octane INTEGER",
+        "ALTER TABLE vehicles ADD COLUMN tank_size_gallons FLOAT",
         """CREATE TABLE IF NOT EXISTS inspection_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),

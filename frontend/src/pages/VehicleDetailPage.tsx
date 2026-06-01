@@ -19,6 +19,7 @@ interface Vehicle {
   current_mileage: number;
   fuel_type: string;
   axle_count?: number;
+  tank_size_gallons?: number;
   created_at: string;
   nhtsa_data?: Record<string, unknown>;
   specs_overrides?: Record<string, unknown>;
@@ -50,6 +51,7 @@ interface FuelEntry {
   cost: number;
   location?: string;
   notes?: string;
+  octane?: number;
   mpg?: number;
 }
 
@@ -175,6 +177,59 @@ function ScanReceiptButton({ onScan }: { onScan: (file: File) => Promise<void> }
         )}
       </button>
       <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+function TankSizeRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(vehicle.tank_size_gallons ?? ''));
+  const [saving, setSaving] = useState(false);
+  const addToast = useToastStore((state) => state.addToast);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updated = await apiClient.updateVehicle(vehicle.id, { tank_size_gallons: value ? Number(value) : null });
+      onUpdate(updated);
+      setEditing(false);
+      addToast('success', 'Tank size updated');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex justify-between text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+        <span className="text-slate-400">Tank Size</span>
+        <button
+          onClick={() => { setValue(String(vehicle.tank_size_gallons ?? '')); setEditing(true); }}
+          className="text-white font-mono hover:text-teal-400 transition-colors group flex items-center gap-1"
+        >
+          {vehicle.tank_size_gallons ? `${vehicle.tank_size_gallons} gal` : <span className="text-slate-500 italic text-xs">Set tank size</span>}
+          <span className="text-slate-500 group-hover:text-teal-400 text-xs">✎</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-2">
+      <span className="text-slate-400">Tank Size</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number" min="1" max="200" step="0.5"
+          className="w-24 px-2 py-0.5 bg-slate-700 border border-teal-500 rounded text-white text-right font-mono text-sm focus:outline-none"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          autoFocus placeholder="e.g. 26"
+        />
+        <span className="text-slate-400 text-xs">gal</span>
+        <button onClick={save} disabled={saving} className="text-teal-400 hover:text-teal-300 text-xs font-medium">{saving ? '...' : 'Save'}</button>
+        <button onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      </div>
     </div>
   );
 }
@@ -411,7 +466,7 @@ export default function VehicleDetailPage() {
   const [specsForm, setSpecsForm] = useState<Record<string, string>>({});
 
   // Form state
-  const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '' });
+  const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
   const [gpsLoading, setGpsLoading] = useState(false);
   const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
     JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
@@ -550,14 +605,14 @@ export default function VehicleDetailPage() {
 
   const openFuelAdd = () => {
     setEditFuel(null);
-    setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '' });
+    setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
     setFormError('');
     setFuelModal(true);
   };
 
   const openFuelEdit = (e: FuelEntry) => {
     setEditFuel(e);
-    setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '' });
+    setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '', octane: e.octane ? String(e.octane) : '' });
     setFormError('');
     setFuelModal(true);
   };
@@ -574,6 +629,7 @@ export default function VehicleDetailPage() {
         cost: Number(fuelForm.cost),
         location: fuelForm.location || undefined,
         notes: fuelForm.notes || undefined,
+        octane: fuelForm.octane ? Number(fuelForm.octane) : undefined,
       };
       if (editFuel) {
         await apiClient.updateFuelEntry(id, editFuel.id, payload);
@@ -1035,6 +1091,9 @@ export default function VehicleDetailPage() {
               </div>
             ))}
             <LicensePlateRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
+            {!isTrailer && vehicle.fuel_type !== 'diesel' && vehicle.fuel_type !== 'electric' && (
+              <TankSizeRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
+            )}
             <MileageRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
           </div>
 
@@ -1292,21 +1351,37 @@ export default function VehicleDetailPage() {
             </div>
           </div>
 
-          {fuelStats && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: 'Avg MPG', value: fuelStats.average_mpg != null ? Number(fuelStats.average_mpg).toFixed(1) : '—' },
-                { label: 'Total Spent', value: `$${Number(fuelStats.total_spent).toFixed(2)}` },
-                { label: 'Total Gallons', value: Number(fuelStats.total_gallons).toFixed(1) },
-                { label: 'Fill-ups', value: fuelStats.entries_count },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
-                  <p className="text-slate-400 text-xs">{label}</p>
-                  <p className="text-white font-semibold mt-0.5">{value}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          {fuelStats && (() => {
+            // Effective octane: weighted avg of recent fills covering 2× tank size (or last 5)
+            const withOctane = [...fuelEntries].sort((a, b) => b.date.localeCompare(a.date)).filter((e) => e.octane);
+            let effectiveOctane: string | null = null;
+            if (withOctane.length >= 1) {
+              const limit = vehicle.tank_size_gallons ? vehicle.tank_size_gallons * 2 : Infinity;
+              let totalGal = 0; let weightedSum = 0;
+              for (const e of withOctane) {
+                if (totalGal >= limit) break;
+                totalGal += e.gallons; weightedSum += e.gallons * e.octane!;
+              }
+              if (totalGal > 0) effectiveOctane = (weightedSum / totalGal).toFixed(1);
+            }
+            const stats = [
+              { label: 'Avg MPG', value: fuelStats.average_mpg != null ? Number(fuelStats.average_mpg).toFixed(1) : '—' },
+              { label: 'Total Spent', value: `$${Number(fuelStats.total_spent).toFixed(2)}` },
+              { label: 'Total Gallons', value: Number(fuelStats.total_gallons).toFixed(1) },
+              { label: 'Fill-ups', value: fuelStats.entries_count },
+              ...(effectiveOctane ? [{ label: 'Eff. Octane', value: effectiveOctane }] : []),
+            ];
+            return (
+              <div className={`grid gap-3 ${stats.length === 5 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
+                {stats.map(({ label, value }) => (
+                  <div key={label} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+                    <p className="text-slate-400 text-xs">{label}</p>
+                    <p className="text-white font-semibold mt-0.5">{value}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
           {fuelEntries.length === 0 ? (
             <div className="card text-center py-10">
@@ -1322,6 +1397,7 @@ export default function VehicleDetailPage() {
                     <th className="px-4 py-3 font-medium">Gallons</th>
                     <th className="px-4 py-3 font-medium">Cost</th>
                     <th className="px-4 py-3 font-medium">MPG</th>
+                    {vehicle.fuel_type !== 'diesel' && vehicle.fuel_type !== 'electric' && <th className="px-4 py-3 font-medium">Octane</th>}
                     <th className="px-4 py-3 font-medium">Location</th>
                     <th className="px-4 py-3"></th>
                   </tr>
@@ -1336,6 +1412,9 @@ export default function VehicleDetailPage() {
                       <td className="px-4 py-3 text-slate-300">
                         {e.mpg != null ? Number(e.mpg).toFixed(1) : '—'}
                       </td>
+                      {vehicle.fuel_type !== 'diesel' && vehicle.fuel_type !== 'electric' && (
+                        <td className="px-4 py-3 text-slate-300">{e.octane ? `${e.octane}` : '—'}</td>
+                      )}
                       <td className="px-4 py-3 text-slate-400">{e.location || '—'}</td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
@@ -1421,6 +1500,20 @@ export default function VehicleDetailPage() {
                 <textarea className="input-field" rows={2} value={fuelForm.notes}
                   onChange={(e) => setFuelForm((p) => ({ ...p, notes: e.target.value }))} />
               </div>
+              {vehicle.fuel_type === 'gasoline' && (
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Octane Grade</label>
+                  <select className="input-field" value={fuelForm.octane}
+                    onChange={(e) => setFuelForm((p) => ({ ...p, octane: e.target.value }))}>
+                    <option value="">— not recorded —</option>
+                    <option value="87">87 (Regular)</option>
+                    <option value="89">89 (Mid-Grade)</option>
+                    <option value="91">91 (Premium)</option>
+                    <option value="93">93 (Premium)</option>
+                    <option value="100">100 (Racing)</option>
+                  </select>
+                </div>
+              )}
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
                   {saving ? 'Saving...' : 'Save'}
@@ -2360,6 +2453,7 @@ export default function VehicleDetailPage() {
       {activeTab === 'analytics' && (
         <AnalyticsTab
           isTrailer={isTrailer}
+          isGasoline={vehicle.fuel_type === 'gasoline'}
           loading={analyticsLoading}
           fuelEntries={analyticsFuel}
           maintEntries={analyticsMaint}
