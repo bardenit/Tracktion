@@ -39,6 +39,7 @@ def run_migrations():
         "ALTER TABLE fuel_entries ADD COLUMN octane INTEGER",
         "ALTER TABLE vehicles ADD COLUMN tank_size_gallons FLOAT",
         "ALTER TABLE vehicles ADD COLUMN smartcar_vehicle_id VARCHAR(255)",
+        "ALTER TABLE vehicles ADD COLUMN smartcar_user_id VARCHAR(255)",
         "ALTER TABLE vehicles ADD COLUMN smartcar_access_token TEXT",
         "ALTER TABLE vehicles ADD COLUMN smartcar_refresh_token TEXT",
         "ALTER TABLE vehicles ADD COLUMN smartcar_token_expires_at TIMESTAMP",

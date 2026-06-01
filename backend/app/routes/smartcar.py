@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import urllib.parse
 import httpx
 
@@ -9,22 +9,38 @@ from app.auth import get_current_user
 from app.models import User, Vehicle
 from app.database import get_db, SessionLocal
 from app.data_config import get_config
-from app.schemas import SmartcarExchangeRequest, SmartcarExchangeResponse, SmartcarVehicleInfo, SmartcarLinkRequest
+from app.schemas import SmartcarConnectRequest, SmartcarConnectResponse, SmartcarVehicleInfo, SmartcarLinkRequest
 
 router = APIRouter()
 
 SMARTCAR_AUTH_URL = "https://connect.smartcar.com/oauth/authorize"
-SMARTCAR_TOKEN_URL = "https://auth.smartcar.com/oauth/token"
+SMARTCAR_TOKEN_URL = "https://iam.smartcar.com/oauth2/token"
 SMARTCAR_API_BASE = "https://api.smartcar.com/v2.0"
 
 
-def _smartcar_creds() -> tuple[str, str]:
+def _smartcar_creds() -> tuple[str, str, str]:
+    """Returns (app_id, m2m_client_id, m2m_secret). app_id is for Connect URL; m2m_* for token exchange."""
     cfg = get_config().get("integrations", {})
-    client_id = cfg.get("smartcar_client_id", "")
-    client_secret = cfg.get("smartcar_client_secret", "")
-    if not client_id or not client_secret:
-        raise HTTPException(status_code=400, detail="Smartcar not configured — add client ID and secret in Settings → Integrations")
-    return client_id, client_secret
+    app_id = cfg.get("smartcar_client_id", "")
+    m2m_client_id = cfg.get("smartcar_m2m_client_id", "")
+    m2m_secret = cfg.get("smartcar_client_secret", "")
+    if not app_id:
+        raise HTTPException(status_code=400, detail="Smartcar Application ID not configured — add it in Settings → Integrations")
+    if not m2m_client_id or not m2m_secret:
+        raise HTTPException(status_code=400, detail="Smartcar M2M credentials not configured — add Client ID and Secret in Settings → Integrations")
+    return app_id, m2m_client_id, m2m_secret
+
+
+def _get_app_token(m2m_client_id: str, m2m_secret: str) -> str:
+    """Fetches a fresh application-level access token via client_credentials grant."""
+    r = httpx.post(SMARTCAR_TOKEN_URL, data={
+        "grant_type": "client_credentials",
+        "client_id": m2m_client_id,
+        "client_secret": m2m_secret,
+    }, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Smartcar token request failed: {r.text}")
+    return r.json()["access_token"]
 
 
 def _check_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
@@ -34,62 +50,30 @@ def _check_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
     return vehicle
 
 
-def _do_token_refresh(vehicle: Vehicle, client_id: str, client_secret: str, db: Session) -> Optional[str]:
-    try:
-        r = httpx.post(SMARTCAR_TOKEN_URL, data={
-            "grant_type": "refresh_token",
-            "refresh_token": vehicle.smartcar_refresh_token,
-        }, auth=(client_id, client_secret), timeout=15)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        vehicle.smartcar_access_token = data["access_token"]
-        vehicle.smartcar_refresh_token = data.get("refresh_token", vehicle.smartcar_refresh_token)
-        vehicle.smartcar_token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=data.get("expires_in", 7200))
-        db.commit()
-        return data["access_token"]
-    except Exception:
-        return None
-
-
 def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
     """Fetch odometer from Smartcar and update vehicle mileage. Returns miles or None on failure."""
     cfg = get_config().get("integrations", {})
-    client_id = cfg.get("smartcar_client_id", "")
-    client_secret = cfg.get("smartcar_client_secret", "")
-    if not client_id or not client_secret:
+    m2m_client_id = cfg.get("smartcar_m2m_client_id", "")
+    m2m_secret = cfg.get("smartcar_client_secret", "")
+    if not m2m_client_id or not m2m_secret:
         return None
-    if not vehicle.smartcar_vehicle_id or not vehicle.smartcar_access_token:
+    if not vehicle.smartcar_vehicle_id or not vehicle.smartcar_user_id:
         return None
 
-    now = datetime.now(timezone.utc)
-    access_token = vehicle.smartcar_access_token
+    try:
+        access_token = _get_app_token(m2m_client_id, m2m_secret)
+    except Exception:
+        return None
 
-    # Refresh if expired
-    if vehicle.smartcar_token_expires_at:
-        expires = vehicle.smartcar_token_expires_at
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        if expires <= now:
-            access_token = _do_token_refresh(vehicle, client_id, client_secret, db)
-            if not access_token:
-                return None
-
-    headers = {"Authorization": f"Bearer {access_token}", "SC-Unit-System": "imperial"}
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "SC-Unit-System": "imperial",
+        "sc-user-id": vehicle.smartcar_user_id,
+    }
     try:
         r = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vehicle.smartcar_vehicle_id}/odometer", headers=headers, timeout=15)
     except Exception:
         return None
-
-    if r.status_code == 401:
-        access_token = _do_token_refresh(vehicle, client_id, client_secret, db)
-        if not access_token:
-            return None
-        headers["Authorization"] = f"Bearer {access_token}"
-        try:
-            r = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vehicle.smartcar_vehicle_id}/odometer", headers=headers, timeout=15)
-        except Exception:
-            return None
 
     if r.status_code != 200:
         return None
@@ -97,7 +81,7 @@ def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
     distance = r.json().get("distance")
     if distance is not None and distance > vehicle.current_mileage:
         vehicle.current_mileage = distance
-    vehicle.smartcar_last_synced_at = now
+    vehicle.smartcar_last_synced_at = datetime.now(timezone.utc)
     db.commit()
     return distance
 
@@ -121,10 +105,10 @@ def run_daily_sync():
 
 @router.get("/auth-url")
 def get_auth_url(redirect_uri: str, current_user: User = Depends(get_current_user)):
-    client_id, _ = _smartcar_creds()
+    app_id, _, _ = _smartcar_creds()
     params = {
         "response_type": "code",
-        "client_id": client_id,
+        "client_id": app_id,
         "redirect_uri": redirect_uri,
         "scope": "read_vehicle_info read_odometer",
         "mode": "live",
@@ -133,45 +117,30 @@ def get_auth_url(redirect_uri: str, current_user: User = Depends(get_current_use
     return {"url": url}
 
 
-@router.post("/exchange", response_model=SmartcarExchangeResponse)
-def exchange_code(body: SmartcarExchangeRequest, current_user: User = Depends(get_current_user)):
-    client_id, client_secret = _smartcar_creds()
+@router.post("/connect", response_model=SmartcarConnectResponse)
+def connect_user(body: SmartcarConnectRequest, current_user: User = Depends(get_current_user)):
+    """Called after OAuth redirect — receives Smartcar user_id, lists their vehicles."""
+    _, m2m_client_id, m2m_secret = _smartcar_creds()
+    access_token = _get_app_token(m2m_client_id, m2m_secret)
 
-    r = httpx.post(SMARTCAR_TOKEN_URL, data={
-        "grant_type": "authorization_code",
-        "code": body.code,
-        "redirect_uri": body.redirect_uri,
-    }, auth=(client_id, client_secret), timeout=15)
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "sc-user-id": body.user_id,
+    }
 
-    if r.status_code != 200:
-        raise HTTPException(status_code=400, detail=f"Smartcar token exchange failed: {r.text}")
-
-    token_data = r.json()
-    access_token = token_data["access_token"]
-    refresh_token = token_data["refresh_token"]
-    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 7200))).isoformat()
-
-    # List vehicles in this account
-    vr = httpx.get(f"{SMARTCAR_API_BASE}/vehicles",
-                   headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
+    vr = httpx.get(f"{SMARTCAR_API_BASE}/vehicles", headers=headers, timeout=15)
     if vr.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to list Smartcar vehicles")
+        raise HTTPException(status_code=400, detail=f"Failed to list Smartcar vehicles: {vr.text}")
 
     vehicle_ids = vr.json().get("vehicles", [])
     vehicles = []
     for vid in vehicle_ids:
-        info = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vid}",
-                         headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
+        info = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vid}", headers=headers, timeout=15)
         if info.status_code == 200:
             d = info.json()
             vehicles.append(SmartcarVehicleInfo(id=vid, make=d.get("make"), model=d.get("model"), year=d.get("year")))
 
-    return SmartcarExchangeResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_expires_at=expires_at,
-        vehicles=vehicles,
-    )
+    return SmartcarConnectResponse(user_id=body.user_id, vehicles=vehicles)
 
 
 @router.post("/link/{vehicle_id}")
@@ -179,12 +148,10 @@ def link_vehicle(vehicle_id: int, body: SmartcarLinkRequest,
                  db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     vehicle = _check_vehicle(vehicle_id, current_user, db)
     vehicle.smartcar_vehicle_id = body.smartcar_vehicle_id
-    vehicle.smartcar_access_token = body.access_token
-    vehicle.smartcar_refresh_token = body.refresh_token
-    try:
-        vehicle.smartcar_token_expires_at = datetime.fromisoformat(body.token_expires_at.replace("Z", "+00:00"))
-    except Exception:
-        vehicle.smartcar_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
+    vehicle.smartcar_user_id = body.smartcar_user_id
+    vehicle.smartcar_access_token = None
+    vehicle.smartcar_refresh_token = None
+    vehicle.smartcar_token_expires_at = None
     db.commit()
     return {"message": "Vehicle linked to Smartcar"}
 
@@ -193,6 +160,7 @@ def link_vehicle(vehicle_id: int, body: SmartcarLinkRequest,
 def unlink_vehicle(vehicle_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     vehicle = _check_vehicle(vehicle_id, current_user, db)
     vehicle.smartcar_vehicle_id = None
+    vehicle.smartcar_user_id = None
     vehicle.smartcar_access_token = None
     vehicle.smartcar_refresh_token = None
     vehicle.smartcar_token_expires_at = None

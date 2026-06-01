@@ -401,8 +401,9 @@ class StorageSettingsResponse(BaseModel):
 
 class IntegrationsSettings(BaseModel):
     anthropic_api_key: Optional[str] = None
-    smartcar_client_id: Optional[str] = None
-    smartcar_client_secret: Optional[str] = None
+    smartcar_client_id: Optional[str] = None       # Application ID UUID (for Connect URL)
+    smartcar_m2m_client_id: Optional[str] = None   # M2M Client ID (for token exchange)
+    smartcar_client_secret: Optional[str] = None   # M2M Client Secret
 
 
 class IntegrationsSettingsResponse(BaseModel):
@@ -410,13 +411,14 @@ class IntegrationsSettingsResponse(BaseModel):
     anthropic_api_key_preview: Optional[str] = None
     smartcar_client_id_set: bool = False
     smartcar_client_id: Optional[str] = None
+    smartcar_m2m_client_id_set: bool = False
+    smartcar_m2m_client_id: Optional[str] = None
     smartcar_client_secret_set: bool = False
 
 
 # Smartcar schemas
-class SmartcarExchangeRequest(BaseModel):
-    code: str
-    redirect_uri: str
+class SmartcarConnectRequest(BaseModel):
+    user_id: str   # Smartcar user_id from OAuth callback
 
 
 class SmartcarVehicleInfo(BaseModel):
@@ -426,18 +428,14 @@ class SmartcarVehicleInfo(BaseModel):
     year: Optional[int] = None
 
 
-class SmartcarExchangeResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_expires_at: str
+class SmartcarConnectResponse(BaseModel):
+    user_id: str
     vehicles: List[SmartcarVehicleInfo]
 
 
 class SmartcarLinkRequest(BaseModel):
     smartcar_vehicle_id: str
-    access_token: str
-    refresh_token: str
-    token_expires_at: str
+    smartcar_user_id: str
 
 
 # Inspection Schemas

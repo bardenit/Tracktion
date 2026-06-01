@@ -18,12 +18,6 @@ interface TracktionVehicle {
   year: number;
 }
 
-interface TokenData {
-  access_token: string;
-  refresh_token: string;
-  token_expires_at: string;
-}
-
 export default function SmartcarCallbackPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -31,14 +25,14 @@ export default function SmartcarCallbackPage() {
 
   const [status, setStatus] = useState<'loading' | 'mapping' | 'saving' | 'error'>('loading');
   const [error, setError] = useState('');
+  const [smartcarUserId, setSmartcarUserId] = useState('');
   const [smartcarVehicles, setSmartcarVehicles] = useState<SmartcarVehicle[]>([]);
   const [tracktionVehicles, setTracktionVehicles] = useState<TracktionVehicle[]>([]);
-  const [tokenData, setTokenData] = useState<TokenData | null>(null);
   // Maps smartcar vehicle id → selected tracktion vehicle id (or '' for skip)
   const [mappings, setMappings] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    const code = searchParams.get('code');
+    const userId = searchParams.get('user_id');
     const errorParam = searchParams.get('error');
 
     if (errorParam) {
@@ -47,38 +41,30 @@ export default function SmartcarCallbackPage() {
       return;
     }
 
-    if (!code) {
-      setError('No authorization code received from Smartcar.');
+    if (!userId) {
+      setError('No user ID received from Smartcar.');
       setStatus('error');
       return;
     }
 
-    const redirectUri = `${window.location.origin}/smartcar/callback`;
-
     Promise.all([
-      apiClient.exchangeSmartcarCode(code, redirectUri),
+      apiClient.connectSmartcarUser(userId),
       apiClient.listVehicles(),
-    ]).then(([exchangeData, vehicles]) => {
-      setTokenData({
-        access_token: exchangeData.access_token,
-        refresh_token: exchangeData.refresh_token,
-        token_expires_at: exchangeData.token_expires_at,
-      });
-      setSmartcarVehicles(exchangeData.vehicles);
+    ]).then(([connectData, vehicles]) => {
+      setSmartcarUserId(userId);
+      setSmartcarVehicles(connectData.vehicles);
       setTracktionVehicles(vehicles);
-      // Pre-populate mappings with empty (skip)
       const initial: Record<string, string> = {};
-      for (const v of exchangeData.vehicles) initial[v.id] = '';
+      for (const v of connectData.vehicles) initial[v.id] = '';
       setMappings(initial);
       setStatus('mapping');
     }).catch((err) => {
-      setError(err?.response?.data?.detail || 'Failed to connect to Smartcar. Check your client credentials.');
+      setError(err?.response?.data?.detail || 'Failed to connect to Smartcar. Check your credentials in Settings.');
       setStatus('error');
     });
   }, []);
 
   const handleSave = async () => {
-    if (!tokenData) return;
     const pairs = Object.entries(mappings).filter(([, tracktionId]) => tracktionId !== '');
     if (pairs.length === 0) {
       addToast('error', 'Select at least one vehicle to link');
@@ -89,9 +75,7 @@ export default function SmartcarCallbackPage() {
       await Promise.all(pairs.map(([smartcarId, tracktionId]) =>
         apiClient.linkSmartcarVehicle(Number(tracktionId), {
           smartcar_vehicle_id: smartcarId,
-          access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
-          token_expires_at: tokenData.token_expires_at,
+          smartcar_user_id: smartcarUserId,
         })
       ));
       addToast('success', `${pairs.length} vehicle${pairs.length > 1 ? 's' : ''} linked to Smartcar`);
@@ -111,7 +95,7 @@ export default function SmartcarCallbackPage() {
         {status === 'loading' && (
           <div className="text-center space-y-3">
             <p className="text-white font-semibold">Connecting to Smartcar...</p>
-            <p className="text-slate-400 text-sm">Exchanging authorization code</p>
+            <p className="text-slate-400 text-sm">Loading your vehicles</p>
           </div>
         )}
 

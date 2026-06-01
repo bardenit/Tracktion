@@ -63,9 +63,11 @@ export default function SettingsPage() {
   const [intStatus, setIntStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   // ── Smartcar ──────────────────────────────────────────────────────────────
-  const [smartcarClientId, setSmartcarClientId] = useState('');
+  const [smartcarClientId, setSmartcarClientId] = useState('');       // Application ID UUID
+  const [smartcarM2mClientId, setSmartcarM2mClientId] = useState(''); // M2M Client ID
   const [smartcarClientSecret, setSmartcarClientSecret] = useState('');
   const [smartcarClientIdSet, setSmartcarClientIdSet] = useState(false);
+  const [smartcarM2mClientIdSet, setSmartcarM2mClientIdSet] = useState(false);
   const [smartcarClientSecretSet, setSmartcarClientSecretSet] = useState(false);
   const [smartcarSaving, setSmartcarSaving] = useState(false);
   const [smartcarStatus, setSmartcarStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
@@ -106,8 +108,10 @@ export default function SettingsPage() {
         setAnthropicKeySet(s.anthropic_api_key_set || false);
         setAnthropicKeyPreview(s.anthropic_api_key_preview || null);
         setSmartcarClientIdSet(s.smartcar_client_id_set || false);
+        setSmartcarM2mClientIdSet(s.smartcar_m2m_client_id_set || false);
         setSmartcarClientSecretSet(s.smartcar_client_secret_set || false);
         if (s.smartcar_client_id) setSmartcarClientId(s.smartcar_client_id);
+        if (s.smartcar_m2m_client_id) setSmartcarM2mClientId(s.smartcar_m2m_client_id);
       }).catch(() => {});
     }
   }, [activeTab]);
@@ -240,14 +244,17 @@ export default function SettingsPage() {
     try {
       await apiClient.saveIntegrationsSettings({
         smartcar_client_id: smartcarClientId || undefined,
+        smartcar_m2m_client_id: smartcarM2mClientId || undefined,
         smartcar_client_secret: smartcarClientSecret || undefined,
       });
       addToast('success', 'Smartcar credentials saved');
       setSmartcarClientSecret('');
       const s = await apiClient.getIntegrationsSettings();
       setSmartcarClientIdSet(s.smartcar_client_id_set || false);
+      setSmartcarM2mClientIdSet(s.smartcar_m2m_client_id_set || false);
       setSmartcarClientSecretSet(s.smartcar_client_secret_set || false);
       if (s.smartcar_client_id) setSmartcarClientId(s.smartcar_client_id);
+      if (s.smartcar_m2m_client_id) setSmartcarM2mClientId(s.smartcar_m2m_client_id);
       setSmartcarStatus({ type: 'success', msg: 'Credentials saved. You can now connect vehicles from their detail page.' });
     } catch (err: any) {
       setSmartcarStatus({ type: 'error', msg: err.response?.data?.detail || 'Save failed' });
@@ -640,30 +647,32 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Smartcar</h2>
               <div className={`flex items-center gap-2 rounded px-3 py-2 text-sm mb-2 ${
-                smartcarClientIdSet && smartcarClientSecretSet
+                smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet
                   ? 'bg-slate-700/50'
                   : 'bg-amber-900/20 border border-amber-700/40'
               }`}>
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  smartcarClientIdSet && smartcarClientSecretSet ? 'bg-green-400' : 'bg-amber-400'
+                  smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet ? 'bg-green-400' : 'bg-amber-400'
                 }`} />
                 <span className="text-slate-300">
-                  {smartcarClientIdSet && smartcarClientSecretSet
+                  {smartcarClientIdSet && smartcarM2mClientIdSet && smartcarClientSecretSet
                     ? 'Configured — connect vehicles from their detail page'
-                    : 'Not configured — add credentials to enable mileage sync'}
+                    : 'Not fully configured — add all three credentials to enable mileage sync'}
                 </span>
               </div>
               <p className="text-slate-500 text-xs">
-                Get credentials at{' '}
-                <span className="font-mono text-slate-400">dashboard.smartcar.com</span>.
-                Set your redirect URI to{' '}
+                From <span className="font-mono text-slate-400">dashboard.smartcar.com</span>:{' '}
+                Application ID from <em>Application Details</em>, M2M Client ID + Secret from <em>API Credentials</em>.
+                Set redirect URI to{' '}
                 <span className="font-mono text-teal-400 break-all">{window.location.origin}/smartcar/callback</span>
               </p>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Client ID</label>
+                <label className="block text-sm text-slate-300 mb-1">
+                  Application ID <span className="text-slate-500 text-xs">(Application Details tab — UUID format)</span>
+                </label>
                 <input
                   className="input-field font-mono text-sm"
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -673,7 +682,19 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">
-                  Client Secret {smartcarClientSecretSet && <span className="text-slate-500 text-xs">(stored — blank to keep)</span>}
+                  M2M Client ID <span className="text-slate-500 text-xs">(API Credentials tab)</span>
+                </label>
+                <input
+                  className="input-field font-mono text-sm"
+                  placeholder="client_..."
+                  value={smartcarM2mClientId}
+                  onChange={(e) => setSmartcarM2mClientId(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">
+                  M2M Client Secret <span className="text-slate-500 text-xs">(API Credentials tab)</span>
+                  {smartcarClientSecretSet && <span className="text-slate-500 text-xs ml-1">(stored — blank to keep)</span>}
                 </label>
                 <input
                   className="input-field font-mono text-sm"
@@ -691,7 +712,7 @@ export default function SettingsPage() {
 
             <button
               onClick={handleSaveSmartcar}
-              disabled={smartcarSaving || (!smartcarClientId && !smartcarClientSecret)}
+              disabled={smartcarSaving || (!smartcarClientId && !smartcarM2mClientId && !smartcarClientSecret)}
               className="btn-primary w-full"
             >
               {smartcarSaving ? 'Saving...' : 'Save Smartcar Credentials'}

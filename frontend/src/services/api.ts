@@ -529,12 +529,12 @@ class ApiClient {
     return response.data.url;
   }
 
-  async exchangeSmartcarCode(code: string, redirectUri: string) {
-    const response = await this.client.post('/smartcar/exchange', { code, redirect_uri: redirectUri });
+  async connectSmartcarUser(userId: string) {
+    const response = await this.client.post('/smartcar/connect', { user_id: userId });
     return response.data;
   }
 
-  async linkSmartcarVehicle(vehicleId: number, data: { smartcar_vehicle_id: string; access_token: string; refresh_token: string; token_expires_at: string }) {
+  async linkSmartcarVehicle(vehicleId: number, data: { smartcar_vehicle_id: string; smartcar_user_id: string }) {
     const response = await this.client.post(`/smartcar/link/${vehicleId}`, data);
     return response.data;
   }

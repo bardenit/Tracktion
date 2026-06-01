@@ -46,6 +46,7 @@ class Vehicle(Base):
     nhtsa_data = Column(JSON, nullable=True)
     specs_overrides = Column(JSON, nullable=True)
     smartcar_vehicle_id = Column(String(255), nullable=True)
+    smartcar_user_id = Column(String(255), nullable=True)
     smartcar_access_token = Column(Text, nullable=True)
     smartcar_refresh_token = Column(Text, nullable=True)
     smartcar_token_expires_at = Column(DateTime, nullable=True)
