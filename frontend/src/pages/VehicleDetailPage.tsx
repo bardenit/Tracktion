@@ -598,6 +598,7 @@ export default function VehicleDetailPage() {
 
   // Form state
   const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
+  const [fuelMileageSyncing, setFuelMileageSyncing] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
     JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
@@ -1718,7 +1719,24 @@ export default function VehicleDetailPage() {
                     onChange={(e) => setFuelForm((p) => ({ ...p, date: e.target.value }))} required />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm text-slate-300">Mileage *</label>
+                    {!editFuel && vehicle?.smartcar_vehicle_id && (
+                      <button type="button" disabled={fuelMileageSyncing}
+                        className="text-xs text-teal-400 hover:text-teal-300 disabled:opacity-40 transition-colors"
+                        onClick={async () => {
+                          setFuelMileageSyncing(true);
+                          try {
+                            const r = await apiClient.syncSmartcarVehicle(Number(id));
+                            setFuelForm((p) => ({ ...p, mileage: Math.round(r.mileage) }));
+                            setVehicle((v) => v ? { ...v, current_mileage: r.mileage } : v);
+                          } catch { /* ignore */ }
+                          finally { setFuelMileageSyncing(false); }
+                        }}>
+                        {fuelMileageSyncing ? 'Syncing…' : '↓ Sync from Smartcar'}
+                      </button>
+                    )}
+                  </div>
                   <input type="number" className="input-field" min="0" value={fuelForm.mileage}
                     onChange={(e) => setFuelForm((p) => ({ ...p, mileage: Number(e.target.value) }))} required />
                 </div>
