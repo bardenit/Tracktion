@@ -4,128 +4,12 @@ import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
 import AnalyticsTab from '../components/AnalyticsTab';
+import type {
+  Vehicle, FuelEntry, MaintenanceEntry, Reminder, TripEntry,
+  Expense, VehicleDocument, VehiclePhoto, VehiclePart, InspectionItem, TireEvent,
+} from '../types';
 
 type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect' | 'tires';
-
-interface Vehicle {
-  id: number;
-  nickname?: string;
-  vehicle_type: string;
-  make: string;
-  model: string;
-  year: number;
-  vin?: string;
-  license_plate?: string;
-  current_mileage: number;
-  fuel_type: string;
-  axle_count?: number;
-  tank_size_gallons?: number;
-  created_at: string;
-  nhtsa_data?: Record<string, unknown>;
-  specs_overrides?: Record<string, unknown>;
-}
-
-interface TripEntry {
-  id: number;
-  date: string;
-  miles: number;
-  destination?: string;
-  notes?: string;
-}
-
-interface VehiclePart {
-  id: number;
-  name: string;
-  part_number?: string;
-  brand?: string;
-  category: string;
-  notes?: string;
-  needs_order: boolean;
-}
-
-interface FuelEntry {
-  id: number;
-  date: string;
-  mileage: number;
-  gallons: number;
-  cost: number;
-  location?: string;
-  notes?: string;
-  octane?: number;
-  mpg?: number;
-  cost_per_mile?: number;
-}
-
-interface MaintenanceEntry {
-  id: number;
-  date: string;
-  mileage: number;
-  type: string;
-  cost: number;
-  service_provider?: string;
-  notes?: string;
-}
-
-interface Reminder {
-  id: number;
-  service_type: string;
-  interval_miles?: number;
-  interval_days?: number;
-  target_mileage?: number;
-  reminder_miles?: number;
-  last_performed_mileage?: number;
-  next_due_mileage?: number;
-  next_due_date?: string;
-  is_overdue: boolean;
-}
-
-interface Expense {
-  id: number;
-  category: string;
-  amount: number;
-  date: string;
-  description: string;
-  expires_on?: string;
-}
-
-interface Document {
-  id: number;
-  document_type: string;
-  filename: string;
-  uploaded_at: string;
-}
-
-interface VehiclePhoto {
-  id: number;
-  filename?: string;
-  uploaded_at: string;
-}
-
-interface InspectionItem {
-  id: number;
-  name: string;
-  category: string;
-  last_checked_at: string | null;
-  order_index: number;
-}
-
-interface TireEvent {
-  id: number;
-  event_type: 'install' | 'rotation' | 'pressure' | 'tread';
-  date: string;
-  mileage: number;
-  brand?: string;
-  size?: string;
-  pressure_fl?: number;
-  pressure_fr?: number;
-  pressure_rl?: number;
-  pressure_rr?: number;
-  tread_fl?: number;
-  tread_fr?: number;
-  tread_rl?: number;
-  tread_rr?: number;
-  notes?: string;
-}
 
 const VEHICLE_SERVICE_TYPES = [
   'Oil Change', 'Tire Rotation', 'Brake Service', 'Air Filter',
@@ -466,7 +350,7 @@ export default function VehicleDetailPage() {
   const [maintEntries, setMaintEntries] = useState<MaintenanceEntry[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [documents, setDocuments] = useState<VehicleDocument[]>([]);
 
   // Modal open/close
   const [fuelModal, setFuelModal] = useState(false);
@@ -916,14 +800,6 @@ export default function VehicleDetailPage() {
     const daysLeft = Math.round(milesLeft / avg);
     return { daysLeft, estDate: new Date(Date.now() + daysLeft * 86400000) };
   };
-
-  const avgDailyMiles = (() => {
-    if (fuelEntries.length < 2) return null;
-    const sorted = [...fuelEntries].sort((a, b) => a.date.localeCompare(b.date));
-    const days = (new Date(sorted[sorted.length - 1].date).getTime() - new Date(sorted[0].date).getTime()) / 86400000;
-    if (days <= 0) return null;
-    return (sorted[sorted.length - 1].mileage - sorted[0].mileage) / days;
-  })();
 
   const reminderStatus = (r: Reminder) => {
     const threshold = r.reminder_miles ?? 500;
@@ -1747,8 +1623,8 @@ export default function VehicleDetailPage() {
                             <p className="text-slate-400 text-xs mt-0.5">
                               Due at {r.next_due_mileage.toLocaleString()} mi
                               {r.reminder_miles ? ` · alert at ${(r.next_due_mileage - r.reminder_miles).toLocaleString()} mi` : ''}
-                              {avgDailyMiles && vehicle && r.next_due_mileage > vehicle.current_mileage && (
-                                <span className="ml-1 text-slate-500">≈ {Math.round((r.next_due_mileage - vehicle.current_mileage) / avgDailyMiles)} days</span>
+                              {avgMilesPerDay() && vehicle && r.next_due_mileage > vehicle.current_mileage && (
+                                <span className="ml-1 text-slate-500">≈ {Math.round((r.next_due_mileage - vehicle.current_mileage) / avgMilesPerDay()!)} days</span>
                               )}
                             </p>
                           ) : !r.target_mileage && !r.next_due_date && (
@@ -2688,7 +2564,7 @@ export default function VehicleDetailPage() {
                         <div key={pos}>
                           <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
                           <input type="number" className="input-field" min="0" step="0.1"
-                            value={(tireForm as any)[`pressure_${pos}`]}
+                            value={String(tireForm[`pressure_${pos}` as keyof typeof tireForm] ?? '')}
                             onChange={(e) => setTireForm((p) => ({ ...p, [`pressure_${pos}`]: e.target.value }))} />
                         </div>
                       ))}
@@ -2703,7 +2579,7 @@ export default function VehicleDetailPage() {
                         <div key={pos}>
                           <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
                           <input type="number" className="input-field" min="0" step="1"
-                            value={(tireForm as any)[`tread_${pos}`]}
+                            value={String(tireForm[`tread_${pos}` as keyof typeof tireForm] ?? '')}
                             onChange={(e) => setTireForm((p) => ({ ...p, [`tread_${pos}`]: e.target.value }))} />
                         </div>
                       ))}

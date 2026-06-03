@@ -2,40 +2,12 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import VehiclePhoto from '../components/VehiclePhoto';
-
-interface Vehicle {
-  id: number;
-  nickname?: string;
-  vehicle_type: string;
-  make: string;
-  model: string;
-  year: number;
-  current_mileage: number;
-  fuel_type: string;
-}
+import type { Vehicle, Reminder, Expense } from '../types';
 
 interface FuelStats {
   average_mpg: number | null;
   total_spent: number;
   entries_count: number;
-}
-
-interface Reminder {
-  id: number;
-  service_type: string;
-  is_overdue: boolean;
-  next_due_mileage?: number;
-  next_due_date?: string;
-  reminder_miles?: number;
-  interval_miles?: number;
-  interval_days?: number;
-}
-
-interface Expense {
-  id: number;
-  description: string;
-  category: string;
-  expires_on?: string;
 }
 
 interface Alert {

@@ -1,4 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
+import type {
+  Vehicle, FuelEntry, MaintenanceEntry, TripEntry, Expense,
+  VehiclePart, TireEvent, InspectionItem, VehicleDocument,
+} from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
 
@@ -145,22 +149,22 @@ class ApiClient {
   }
 
   // Vehicle endpoints
-  async createVehicle(vehicleData: any) {
+  async createVehicle(vehicleData: any): Promise<Vehicle> {
     const response = await this.client.post('/vehicles/', vehicleData);
     return response.data;
   }
 
-  async listVehicles() {
+  async listVehicles(): Promise<Vehicle[]> {
     const response = await this.client.get('/vehicles/');
     return response.data;
   }
 
-  async getVehicle(vehicleId: number) {
+  async getVehicle(vehicleId: number): Promise<Vehicle> {
     const response = await this.client.get(`/vehicles/${vehicleId}`);
     return response.data;
   }
 
-  async updateVehicle(vehicleId: number, vehicleData: any) {
+  async updateVehicle(vehicleId: number, vehicleData: any): Promise<Vehicle> {
     const response = await this.client.put(`/vehicles/${vehicleId}`, vehicleData);
     return response.data;
   }
@@ -180,13 +184,13 @@ class ApiClient {
     return response.data;
   }
 
-  async updateSpecsOverrides(vehicleId: number, overrides: Record<string, string>) {
+  async updateSpecsOverrides(vehicleId: number, overrides: Record<string, string>): Promise<Vehicle> {
     const response = await this.client.put(`/vehicles/${vehicleId}`, { specs_overrides: overrides });
     return response.data;
   }
 
   // Parts endpoints
-  async listParts(vehicleId: number) {
+  async listParts(vehicleId: number): Promise<VehiclePart[]> {
     const response = await this.client.get(`/parts/${vehicleId}/parts`);
     return response.data;
   }
@@ -207,7 +211,7 @@ class ApiClient {
   }
 
   // Trip endpoints
-  async listTrips(vehicleId: number) {
+  async listTrips(vehicleId: number): Promise<TripEntry[]> {
     const response = await this.client.get(`/trips/${vehicleId}/entries`);
     return response.data;
   }
@@ -241,7 +245,7 @@ class ApiClient {
     return response.data;
   }
 
-  async updateVehicleMileage(vehicleId: number, mileage: number) {
+  async updateVehicleMileage(vehicleId: number, mileage: number): Promise<Vehicle> {
     const response = await this.client.put(`/vehicles/${vehicleId}`, { current_mileage: mileage });
     return response.data;
   }
@@ -332,7 +336,7 @@ class ApiClient {
     return response.data;
   }
 
-  async listFuelEntries(vehicleId: number) {
+  async listFuelEntries(vehicleId: number): Promise<FuelEntry[]> {
     const response = await this.client.get(`/fuel/${vehicleId}/entries`);
     return response.data;
   }
@@ -363,7 +367,7 @@ class ApiClient {
     return response.data;
   }
 
-  async listMaintenanceEntries(vehicleId: number) {
+  async listMaintenanceEntries(vehicleId: number): Promise<MaintenanceEntry[]> {
     const response = await this.client.get(`/maintenance/${vehicleId}/entries`);
     return response.data;
   }
@@ -414,7 +418,7 @@ class ApiClient {
     return response.data;
   }
 
-  async listExpenses(vehicleId: number) {
+  async listExpenses(vehicleId: number): Promise<Expense[]> {
     const response = await this.client.get(`/expenses/${vehicleId}/entries`);
     return response.data;
   }
@@ -449,7 +453,7 @@ class ApiClient {
     return response.data;
   }
 
-  async listDocuments(vehicleId: number) {
+  async listDocuments(vehicleId: number): Promise<VehicleDocument[]> {
     const response = await this.client.get(`/documents/${vehicleId}/documents`);
     return response.data;
   }
@@ -479,7 +483,7 @@ class ApiClient {
     return response.data as Blob;
   }
 
-  async listInspectionItems(vehicleId: number) {
+  async listInspectionItems(vehicleId: number): Promise<InspectionItem[]> {
     const response = await this.client.get(`/inspection/${vehicleId}/items`);
     return response.data;
   }
@@ -504,7 +508,7 @@ class ApiClient {
     return response.data;
   }
 
-  async listTireEvents(vehicleId: number) {
+  async listTireEvents(vehicleId: number): Promise<TireEvent[]> {
     const response = await this.client.get(`/tires/${vehicleId}/events`);
     return response.data;
   }

@@ -3,21 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
 import VehiclePhoto from '../components/VehiclePhoto';
-
-interface Vehicle {
-  id: number;
-  nickname?: string;
-  vehicle_type: string;
-  make: string;
-  model: string;
-  year: number;
-  vin?: string;
-  current_mileage: number;
-  fuel_type: string;
-  axle_count?: number;
-  nhtsa_data?: Record<string, unknown>;
-  specs_overrides?: Record<string, unknown>;
-}
+import type { Vehicle } from '../types';
 
 const FUEL_TYPES = ['gasoline', 'diesel', 'electric', 'hybrid', 'plug-in hybrid'];
 

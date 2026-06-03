@@ -2,11 +2,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-
-interface FuelEntry { id: number; date: string; mileage: number; gallons: number; cost: number; mpg?: number; cost_per_mile?: number; octane?: number; }
-interface MaintenanceEntry { id: number; date: string; cost: number; type: string; }
-interface Expense { id: number; date: string; amount: number; category: string; }
-interface TripEntry { id: number; date: string; miles: number; destination?: string; }
+import type { FuelEntry, MaintenanceEntry, Expense, TripEntry } from '../types';
 
 interface Props {
   isTrailer: boolean;
