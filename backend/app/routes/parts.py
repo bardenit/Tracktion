@@ -17,7 +17,7 @@ def create_part(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     part = VehiclePart(vehicle_id=vehicle_id, **part_data.model_dump())
     db.add(part)
     db.commit()
@@ -43,7 +43,7 @@ def update_part(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     part = db.query(VehiclePart).filter(VehiclePart.id == part_id, VehiclePart.vehicle_id == vehicle_id).first()
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
@@ -61,7 +61,7 @@ def delete_part(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     part = db.query(VehiclePart).filter(VehiclePart.id == part_id, VehiclePart.vehicle_id == vehicle_id).first()
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")

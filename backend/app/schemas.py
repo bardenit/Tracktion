@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, field_validator
+from typing import Optional, List, Literal
 from datetime import date, datetime
 
 
@@ -7,6 +7,13 @@ from datetime import date, datetime
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator('password')
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
 
 
 class UserLogin(BaseModel):
@@ -65,6 +72,10 @@ class VehicleUpdate(BaseModel):
     axle_count: Optional[int] = None
     tank_size_gallons: Optional[float] = None
     specs_overrides: Optional[dict] = None
+
+
+class VINRequest(BaseModel):
+    vin: str
 
 
 class VINDecodeResponse(BaseModel):
@@ -288,7 +299,7 @@ class MaintenanceReminderResponse(BaseModel):
 # Collaborator Schemas
 class VehicleCollaboratorCreate(BaseModel):
     email: EmailStr
-    role: str = "viewer"
+    role: Literal["viewer", "editor"] = "viewer"
 
 
 class VehicleCollaboratorResponse(BaseModel):
@@ -443,7 +454,7 @@ class InspectionItemResponse(BaseModel):
 
 # Tire Event Schemas
 class TireEventCreate(BaseModel):
-    event_type: str  # install | rotation | pressure | tread
+    event_type: Literal["install", "rotation", "pressure", "tread"]
     date: date
     mileage: float
     brand: Optional[str] = None

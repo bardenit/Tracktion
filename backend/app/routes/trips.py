@@ -18,7 +18,7 @@ def create_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     trip = TripEntry(vehicle_id=vehicle_id, **trip_data.model_dump())
     db.add(trip)
     vehicle.current_mileage = (vehicle.current_mileage or 0) + trip_data.miles
@@ -45,7 +45,7 @@ def update_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     trip = db.query(TripEntry).filter(TripEntry.id == trip_id, TripEntry.vehicle_id == vehicle_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -68,7 +68,7 @@ def delete_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     trip = db.query(TripEntry).filter(TripEntry.id == trip_id, TripEntry.vehicle_id == vehicle_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")

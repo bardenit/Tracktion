@@ -79,7 +79,7 @@ def create_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     item = InspectionItem(vehicle_id=vehicle_id, **item_data.model_dump())
     db.add(item)
     db.commit()
@@ -95,7 +95,7 @@ def update_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     item = db.query(InspectionItem).filter(
         InspectionItem.id == item_id, InspectionItem.vehicle_id == vehicle_id
     ).first()
@@ -115,7 +115,7 @@ def check_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     item = db.query(InspectionItem).filter(
         InspectionItem.id == item_id, InspectionItem.vehicle_id == vehicle_id
     ).first()
@@ -133,7 +133,7 @@ def reset_inspection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     db.query(InspectionItem).filter(InspectionItem.vehicle_id == vehicle_id).update(
         {InspectionItem.last_checked_at: None}
     )
@@ -148,7 +148,7 @@ def delete_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     item = db.query(InspectionItem).filter(
         InspectionItem.id == item_id, InspectionItem.vehicle_id == vehicle_id
     ).first()

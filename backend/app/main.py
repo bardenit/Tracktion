@@ -1,10 +1,13 @@
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from app.config import settings
 from app.database import engine, Base, run_migrations
+from app.limiter import limiter
 from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips, ocr, inspection, tires
 from app.routes import settings as settings_router
 
@@ -15,9 +18,16 @@ run_migrations()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.JWT_SECRET_KEY == "change-me-in-production":
+        if not settings.DEBUG:
+            raise RuntimeError(
+                "JWT_SECRET_KEY is set to the default value. "
+                "Set a strong random secret via the JWT_SECRET_KEY environment variable."
+            )
+        logging.warning("JWT_SECRET_KEY is using the default value — change it before deploying.")
+    if "*" in settings.CORS_ORIGINS and not settings.DEBUG:
         logging.warning(
-            "JWT_SECRET_KEY is set to the default value — "
-            "set a strong random secret via the JWT_SECRET_KEY environment variable"
+            "CORS_ORIGINS is set to wildcard '*'. "
+            "Set a specific origin via the CORS_ORIGINS environment variable."
         )
     yield
 
@@ -30,6 +40,19 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
     openapi_url="/openapi.json" if settings.DEBUG else None,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,

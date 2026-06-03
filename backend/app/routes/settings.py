@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import create_engine, text
 from app.auth import get_current_user
@@ -70,8 +71,9 @@ def test_db_connection(s: DBSettings, current_user: User = Depends(get_current_u
             conn.execute(text("SELECT 1"))
         engine.dispose()
         return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logging.exception("DB connection test failed")
+        return {"success": False, "error": "Connection failed. Check your settings."}
 
 
 @router.post("/db")
@@ -83,8 +85,9 @@ def save_db_settings(s: DBSettings, current_user: User = Depends(get_current_use
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         engine.dispose()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Connection failed: {e}")
+    except Exception:
+        logging.exception("DB connection test failed during save")
+        raise HTTPException(status_code=400, detail="Connection test failed. Check your settings.")
     config = get_config()
     config["database"] = {"type": s.type, "url": url, "host": s.host, "port": s.port, "database": s.database, "username": s.username}
     save_config(config)
@@ -114,8 +117,9 @@ def test_storage_connection(s: StorageSettings, current_user: User = Depends(get
     try:
         _build_storage(s).test()
         return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logging.exception("Storage connection test failed")
+        return {"success": False, "error": "Connection failed. Check your settings."}
 
 
 @router.post("/storage")
@@ -123,8 +127,9 @@ def save_storage_settings(s: StorageSettings, current_user: User = Depends(get_c
     if s.type != "local":
         try:
             _build_storage(s).test()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Connection test failed: {e}")
+        except Exception:
+            logging.exception("Storage connection test failed during save")
+            raise HTTPException(status_code=400, detail="Connection test failed. Check your settings.")
 
     config = get_config()
     existing = config.get("storage", {})
@@ -166,8 +171,9 @@ def list_storage_buckets(s: StorageSettings, current_user: User = Depends(get_cu
         client = boto3.client("s3", **kwargs)
         response = client.list_buckets()
         return {"buckets": [b["Name"] for b in response.get("Buckets", [])]}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not list buckets: {e}")
+    except Exception:
+        logging.exception("Storage bucket listing failed")
+        raise HTTPException(status_code=400, detail="Could not list buckets. Check your credentials and settings.")
 
 
 def _build_storage(s: StorageSettings):

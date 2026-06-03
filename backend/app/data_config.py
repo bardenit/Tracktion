@@ -67,6 +67,10 @@ def get_config() -> dict:
 def save_config(config: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(config, indent=2))
+    try:
+        CONFIG_FILE.chmod(0o600)
+    except Exception:
+        pass
 
 
 def get_database_url() -> str:

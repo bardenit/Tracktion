@@ -9,6 +9,7 @@ from app.schemas import (
     VehicleUpdate,
     VehicleResponse,
     VINDecodeResponse,
+    VINRequest,
     VehicleCollaboratorCreate,
     VehicleCollaboratorResponse,
 )
@@ -140,12 +141,12 @@ def delete_vehicle(
 @router.post("/{vehicle_id}/decode-vin", response_model=VINDecodeResponse)
 async def decode_vehicle_vin(
     vehicle_id: int,
-    vin: str,
+    body: VINRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     check_vehicle_access(vehicle_id, current_user.id, db)
-    result = await decode_vin(vin)
+    result = await decode_vin(body.vin)
     if not result:
         raise HTTPException(status_code=400, detail="Invalid VIN or decode failed")
     return result

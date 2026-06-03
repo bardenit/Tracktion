@@ -24,7 +24,7 @@ def create_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
     entry = MaintenanceEntry(
         vehicle_id=vehicle_id,
@@ -97,7 +97,7 @@ def update_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     entry = db.query(MaintenanceEntry).filter(
         MaintenanceEntry.id == entry_id, MaintenanceEntry.vehicle_id == vehicle_id
     ).first()
@@ -123,7 +123,7 @@ def delete_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     entry = db.query(MaintenanceEntry).filter(
         MaintenanceEntry.id == entry_id, MaintenanceEntry.vehicle_id == vehicle_id
     ).first()
@@ -141,7 +141,7 @@ def create_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
     existing = db.query(MaintenanceReminder).filter(
         MaintenanceReminder.vehicle_id == vehicle_id,
@@ -222,7 +222,7 @@ def update_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     reminder = db.query(MaintenanceReminder).filter(
         MaintenanceReminder.id == reminder_id, MaintenanceReminder.vehicle_id == vehicle_id
     ).first()
@@ -244,7 +244,7 @@ def delete_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     reminder = db.query(MaintenanceReminder).filter(
         MaintenanceReminder.id == reminder_id, MaintenanceReminder.vehicle_id == vehicle_id
     ).first()

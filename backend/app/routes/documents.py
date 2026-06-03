@@ -1,6 +1,7 @@
 import io
 import os
 from datetime import datetime, timezone
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -13,6 +14,8 @@ from app.deps import check_vehicle_access
 from app.storage import get_storage
 
 router = APIRouter()
+
+VALID_DOC_TYPES = {"registration", "insurance", "receipt", "service", "warranty", "other"}
 
 ALLOWED_TYPES = {
     "application/pdf",
@@ -56,7 +59,10 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+
+    if document_type not in VALID_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid document type")
 
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="File type not allowed. Allowed: PDF, Images, Word docs")
@@ -73,7 +79,7 @@ async def upload_document(
 
     doc = Document(
         vehicle_id=vehicle_id,
-        filename=file.filename,
+        filename=safe_name,
         storage_path=relative_path,
         document_type=document_type,
         ocr_text=None,
@@ -118,10 +124,11 @@ def download_document(
 
     media_type = _media_type(doc.filename or '')
     disposition = 'inline' if media_type.startswith('image/') else 'attachment'
+    encoded_name = quote(doc.filename or 'file', safe='')
     return StreamingResponse(
         io.BytesIO(content),
         media_type=media_type,
-        headers={"Content-Disposition": f'{disposition}; filename="{doc.filename}"'},
+        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_name}"},
     )
 
 
@@ -132,7 +139,7 @@ def delete_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     doc = db.query(Document).filter(Document.id == document_id, Document.vehicle_id == vehicle_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -151,9 +158,9 @@ async def upload_vehicle_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
-    if file.content_type not in IMAGE_TYPES and not (file.filename or '').lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif')):
+    if file.content_type not in IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Image files only (JPEG, PNG, WebP)")
 
     data = await file.read()
@@ -167,7 +174,7 @@ async def upload_vehicle_photo(
 
     doc = Document(
         vehicle_id=vehicle_id,
-        filename=file.filename,
+        filename=safe_name,
         storage_path=relative_path,
         document_type='vehicle_photo',
     )
@@ -199,7 +206,7 @@ def delete_vehicle_photo_by_id(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     doc = db.query(Document).filter(
         Document.id == photo_id,
         Document.vehicle_id == vehicle_id,
@@ -238,7 +245,7 @@ def get_vehicle_photo(
     return StreamingResponse(
         io.BytesIO(content),
         media_type=media_type,
-        headers={"Content-Disposition": f'inline; filename="{doc.filename}"'},
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(doc.filename or 'photo', safe='')}"},
     )
 
 
@@ -248,7 +255,7 @@ def delete_vehicle_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     doc = (
         db.query(Document)
         .filter(Document.vehicle_id == vehicle_id, Document.document_type == 'vehicle_photo')

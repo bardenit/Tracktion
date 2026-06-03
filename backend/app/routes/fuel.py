@@ -17,7 +17,7 @@ def create_fuel_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
     previous_entry = (
         db.query(FuelEntry)
@@ -99,7 +99,7 @@ def update_fuel_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     entry = db.query(FuelEntry).filter(FuelEntry.id == entry_id, FuelEntry.vehicle_id == vehicle_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Fuel entry not found")
@@ -147,7 +147,7 @@ def delete_fuel_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     entry = db.query(FuelEntry).filter(FuelEntry.id == entry_id, FuelEntry.vehicle_id == vehicle_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Fuel entry not found")

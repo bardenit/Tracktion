@@ -18,7 +18,7 @@ def list_tire_events(vehicle_id: int, current_user: User = Depends(get_current_u
 
 @router.post("/{vehicle_id}/events", response_model=TireEventResponse)
 def create_tire_event(vehicle_id: int, data: TireEventCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     event = TireEvent(vehicle_id=vehicle_id, **data.model_dump())
     db.add(event)
     db.commit()
@@ -28,7 +28,7 @@ def create_tire_event(vehicle_id: int, data: TireEventCreate, current_user: User
 
 @router.put("/{vehicle_id}/events/{event_id}", response_model=TireEventResponse)
 def update_tire_event(vehicle_id: int, event_id: int, data: TireEventCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     event = db.query(TireEvent).filter(TireEvent.id == event_id, TireEvent.vehicle_id == vehicle_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Tire event not found")
@@ -41,7 +41,7 @@ def update_tire_event(vehicle_id: int, event_id: int, data: TireEventCreate, cur
 
 @router.delete("/{vehicle_id}/events/{event_id}")
 def delete_tire_event(vehicle_id: int, event_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     event = db.query(TireEvent).filter(TireEvent.id == event_id, TireEvent.vehicle_id == vehicle_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Tire event not found")

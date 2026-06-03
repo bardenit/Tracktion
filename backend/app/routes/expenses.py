@@ -17,7 +17,7 @@ def create_expense(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     expense = Expense(
         vehicle_id=vehicle_id,
         category=expense_data.category,
@@ -69,7 +69,7 @@ def update_expense(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     expense = db.query(Expense).filter(Expense.id == expense_id, Expense.vehicle_id == vehicle_id).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
@@ -92,7 +92,7 @@ def delete_expense(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     expense = db.query(Expense).filter(Expense.id == expense_id, Expense.vehicle_id == vehicle_id).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
