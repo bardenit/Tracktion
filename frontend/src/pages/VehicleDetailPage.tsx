@@ -23,8 +23,6 @@ interface Vehicle {
   created_at: string;
   nhtsa_data?: Record<string, unknown>;
   specs_overrides?: Record<string, unknown>;
-  smartcar_vehicle_id?: string | null;
-  smartcar_last_synced_at?: string | null;
 }
 
 interface TripEntry {
@@ -437,84 +435,6 @@ function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Veh
   );
 }
 
-function SmartcarRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Vehicle) => void }) {
-  const [syncing, setSyncing] = useState(false);
-  const [unlinking, setUnlinking] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const addToast = useToastStore((state) => state.addToast);
-  const navigate = useNavigate();
-
-  const handleConnect = async () => {
-    setConnecting(true);
-    try {
-      const redirectUri = `${window.location.origin}/smartcar/callback`;
-      const url = await apiClient.getSmartcarAuthUrl(redirectUri);
-      window.location.href = url;
-    } catch (err: any) {
-      addToast('error', err?.response?.data?.detail || 'Smartcar not configured — add credentials in Settings → Integrations');
-      setConnecting(false);
-    }
-  };
-
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      const result = await apiClient.syncSmartcarVehicle(vehicle.id);
-      onUpdate({ ...vehicle, current_mileage: result.mileage, smartcar_last_synced_at: result.synced_at });
-      addToast('success', `Mileage synced: ${result.mileage.toLocaleString()} mi`);
-    } catch (err: any) {
-      addToast('error', err?.response?.data?.detail || 'Sync failed');
-    } finally { setSyncing(false); }
-  };
-
-  const handleUnlink = async () => {
-    if (!confirm('Disconnect Smartcar from this vehicle?')) return;
-    setUnlinking(true);
-    try {
-      await apiClient.unlinkSmartcarVehicle(vehicle.id);
-      onUpdate({ ...vehicle, smartcar_vehicle_id: null, smartcar_last_synced_at: null });
-      addToast('success', 'Smartcar disconnected');
-    } catch { addToast('error', 'Failed to disconnect'); }
-    finally { setUnlinking(false); }
-  };
-
-  const lastSynced = vehicle.smartcar_last_synced_at
-    ? new Date(vehicle.smartcar_last_synced_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-    : null;
-
-  if (vehicle.smartcar_vehicle_id) {
-    return (
-      <div className="border-t border-slate-700 pt-2 mt-1 space-y-2">
-        <div className="flex items-center justify-between text-sm">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-            <span className="text-slate-300 font-medium">Smartcar</span>
-          </div>
-          <span className="text-slate-500 text-xs">{lastSynced ? `Synced ${lastSynced}` : 'Never synced'}</span>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={handleSync} disabled={syncing}
-            className="flex-1 bg-teal-900/40 hover:bg-teal-900/60 border border-teal-700/50 text-teal-300 text-xs py-1.5 rounded transition-colors disabled:opacity-50">
-            {syncing ? 'Syncing...' : 'Sync Now'}
-          </button>
-          <button onClick={handleUnlink} disabled={unlinking}
-            className="bg-slate-700 hover:bg-red-900/40 border border-slate-600 hover:border-red-700/50 text-slate-400 hover:text-red-300 text-xs py-1.5 px-3 rounded transition-colors disabled:opacity-50">
-            {unlinking ? '...' : 'Disconnect'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="border-t border-slate-700 pt-2 mt-1">
-      <button onClick={handleConnect} disabled={connecting}
-        className="w-full flex items-center justify-center gap-2 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-300 text-xs py-2 rounded transition-colors disabled:opacity-50">
-        {connecting ? 'Redirecting...' : 'Connect via Smartcar'}
-      </button>
-    </div>
-  );
-}
 
 export default function VehicleDetailPage() {
   const { vehicleId } = useParams<{ vehicleId: string }>();
@@ -598,7 +518,6 @@ export default function VehicleDetailPage() {
 
   // Form state
   const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
-  const [fuelMileageSyncing, setFuelMileageSyncing] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
     JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
@@ -1307,7 +1226,6 @@ export default function VehicleDetailPage() {
               <TankSizeRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
             )}
             <MileageRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
-            <SmartcarRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
           </div>
 
           {/* Photo gallery */}
@@ -1719,24 +1637,7 @@ export default function VehicleDetailPage() {
                     onChange={(e) => setFuelForm((p) => ({ ...p, date: e.target.value }))} required />
                 </div>
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-sm text-slate-300">Mileage *</label>
-                    {!editFuel && vehicle?.smartcar_vehicle_id && (
-                      <button type="button" disabled={fuelMileageSyncing}
-                        className="text-xs text-teal-400 hover:text-teal-300 disabled:opacity-40 transition-colors"
-                        onClick={async () => {
-                          setFuelMileageSyncing(true);
-                          try {
-                            const r = await apiClient.syncSmartcarVehicle(Number(id));
-                            setFuelForm((p) => ({ ...p, mileage: Math.round(r.mileage) }));
-                            setVehicle((v) => v ? { ...v, current_mileage: r.mileage } : v);
-                          } catch { /* ignore */ }
-                          finally { setFuelMileageSyncing(false); }
-                        }}>
-                        {fuelMileageSyncing ? 'Syncing…' : '↓ Sync from Smartcar'}
-                      </button>
-                    )}
-                  </div>
+                  <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
                   <input type="number" className="input-field" min="0" value={fuelForm.mileage}
                     onChange={(e) => setFuelForm((p) => ({ ...p, mileage: Number(e.target.value) }))} required />
                 </div>

@@ -103,8 +103,6 @@ class VehicleResponse(BaseModel):
     tank_size_gallons: Optional[float] = None
     nhtsa_data: Optional[dict] = None
     specs_overrides: Optional[dict] = None
-    smartcar_vehicle_id: Optional[str] = None
-    smartcar_last_synced_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:
@@ -401,43 +399,11 @@ class StorageSettingsResponse(BaseModel):
 
 class IntegrationsSettings(BaseModel):
     anthropic_api_key: Optional[str] = None
-    smartcar_client_id: Optional[str] = None            # Application ID UUID (for Connect URL)
-    smartcar_m2m_client_id: Optional[str] = None        # M2M Client ID (for bearer token exchange)
-    smartcar_client_secret: Optional[str] = None        # M2M Client Secret
-    smartcar_management_token: Optional[str] = None     # App management token (for vehicle listing)
 
 
 class IntegrationsSettingsResponse(BaseModel):
     anthropic_api_key_set: bool
     anthropic_api_key_preview: Optional[str] = None
-    smartcar_client_id_set: bool = False
-    smartcar_client_id: Optional[str] = None
-    smartcar_m2m_client_id_set: bool = False
-    smartcar_m2m_client_id: Optional[str] = None
-    smartcar_client_secret_set: bool = False
-    smartcar_management_token_set: bool = False
-
-
-# Smartcar schemas
-class SmartcarConnectRequest(BaseModel):
-    user_id: str   # Smartcar user_id from OAuth callback
-
-
-class SmartcarVehicleInfo(BaseModel):
-    id: str
-    make: Optional[str] = None
-    model: Optional[str] = None
-    year: Optional[int] = None
-
-
-class SmartcarConnectResponse(BaseModel):
-    user_id: str
-    vehicles: List[SmartcarVehicleInfo]
-
-
-class SmartcarLinkRequest(BaseModel):
-    smartcar_vehicle_id: str
-    smartcar_user_id: str
 
 
 # Inspection Schemas

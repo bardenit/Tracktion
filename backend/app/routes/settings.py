@@ -9,6 +9,7 @@ from app.schemas import (
     IntegrationsSettings, IntegrationsSettingsResponse,
 )
 
+
 router = APIRouter()
 
 
@@ -187,19 +188,9 @@ def _build_storage(s: StorageSettings):
 def get_integrations_settings(current_user: User = Depends(get_current_user)):
     cfg = get_config().get("integrations", {})
     key = cfg.get("anthropic_api_key", "")
-    client_id = cfg.get("smartcar_client_id", "")
-    m2m_client_id = cfg.get("smartcar_m2m_client_id", "")
-    client_secret = cfg.get("smartcar_client_secret", "")
-    mgmt_token = cfg.get("smartcar_management_token", "")
     return IntegrationsSettingsResponse(
         anthropic_api_key_set=bool(key),
         anthropic_api_key_preview=f"...{key[-4:]}" if key else None,
-        smartcar_client_id_set=bool(client_id),
-        smartcar_client_id=client_id or None,
-        smartcar_m2m_client_id_set=bool(m2m_client_id),
-        smartcar_m2m_client_id=m2m_client_id or None,
-        smartcar_client_secret_set=bool(client_secret),
-        smartcar_management_token_set=bool(mgmt_token),
     )
 
 
@@ -227,10 +218,6 @@ def save_integrations_settings(s: IntegrationsSettings, current_user: User = Dep
     existing = config.get("integrations", {})
     config["integrations"] = {
         "anthropic_api_key": s.anthropic_api_key or existing.get("anthropic_api_key", ""),
-        "smartcar_client_id": (s.smartcar_client_id or existing.get("smartcar_client_id", "")).strip(),
-        "smartcar_m2m_client_id": (s.smartcar_m2m_client_id or existing.get("smartcar_m2m_client_id", "")).strip(),
-        "smartcar_client_secret": (s.smartcar_client_secret or existing.get("smartcar_client_secret", "")).strip(),
-        "smartcar_management_token": (s.smartcar_management_token or existing.get("smartcar_management_token", "")).strip(),
     }
     save_config(config)
     return {"message": "Integration settings saved."}

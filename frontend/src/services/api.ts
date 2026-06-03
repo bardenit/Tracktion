@@ -524,31 +524,6 @@ class ApiClient {
     return response.data;
   }
 
-  async getSmartcarAuthUrl(redirectUri: string): Promise<string> {
-    const response = await this.client.get('/smartcar/auth-url', { params: { redirect_uri: redirectUri } });
-    return response.data.url;
-  }
-
-  async connectSmartcarUser(userId: string) {
-    const response = await this.client.post('/smartcar/connect', { user_id: userId });
-    return response.data;
-  }
-
-  async linkSmartcarVehicle(vehicleId: number, data: { smartcar_vehicle_id: string; smartcar_user_id: string }) {
-    const response = await this.client.post(`/smartcar/link/${vehicleId}`, data);
-    return response.data;
-  }
-
-  async unlinkSmartcarVehicle(vehicleId: number) {
-    const response = await this.client.delete(`/smartcar/link/${vehicleId}`);
-    return response.data;
-  }
-
-  async syncSmartcarVehicle(vehicleId: number) {
-    const response = await this.client.post(`/smartcar/sync/${vehicleId}`);
-    return response.data;
-  }
-
   async getVehiclePhoto(vehicleId: number): Promise<Blob | null> {
     try {
       const response = await this.client.get(`/documents/${vehicleId}/photo`, { responseType: 'blob' });
