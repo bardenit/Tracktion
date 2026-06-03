@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
+from datetime import datetime, timezone, timedelta
 from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserLogin, TokenResponse, UserResponse, RefreshRequest, ChangePasswordRequest
@@ -27,8 +28,24 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 @limiter.limit("10/minute")
 def login(request: Request, credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
+
+    if user and user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        raise HTTPException(status_code=429, detail="Account locked. Try again later.")
+
     if not user or not verify_password(credentials.password, user.password_hash):
+        if user:
+            user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+            user.last_failed_login_at = datetime.now(timezone.utc)
+            if user.failed_login_attempts >= 5:
+                user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+            db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    user.failed_login_attempts = 0
+    user.last_failed_login_at = None
+    user.locked_until = None
+    db.commit()
+
     return TokenResponse(
         access_token=create_access_token({"sub": str(user.id)}),
         refresh_token=create_refresh_token({"sub": str(user.id)}),

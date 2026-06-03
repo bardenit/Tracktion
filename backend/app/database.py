@@ -31,6 +31,9 @@ def get_db():
 def run_migrations():
     from sqlalchemy import text
     new_columns = [
+        "ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN last_failed_login_at DATETIME",
+        "ALTER TABLE users ADD COLUMN locked_until DATETIME",
         "ALTER TABLE maintenance_reminders ADD COLUMN target_mileage FLOAT",
         "ALTER TABLE maintenance_reminders ADD COLUMN reminder_miles INTEGER",
         "ALTER TABLE vehicles ADD COLUMN license_plate VARCHAR(20)",

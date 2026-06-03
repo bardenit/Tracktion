@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, Field
 from typing import Optional, List, Literal
 from datetime import date, datetime
 
@@ -6,7 +6,7 @@ from datetime import date, datetime
 # Auth Schemas
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
 
     @field_validator('password')
     @classmethod
@@ -18,7 +18,7 @@ class UserCreate(BaseModel):
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -32,8 +32,8 @@ class RefreshRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
-    new_password: str
+    current_password: str = Field(..., max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class UserResponse(BaseModel):
@@ -47,35 +47,35 @@ class UserResponse(BaseModel):
 
 # Vehicle Schemas
 class VehicleCreate(BaseModel):
-    nickname: Optional[str] = None
-    vehicle_type: str = "vehicle"
-    make: str
-    model: str
+    nickname: Optional[str] = Field(None, max_length=100)
+    vehicle_type: str = Field("vehicle", max_length=50)
+    make: str = Field(..., max_length=255)
+    model: str = Field(..., max_length=255)
     year: int
-    vin: Optional[str] = None
-    license_plate: Optional[str] = None
+    vin: Optional[str] = Field(None, max_length=17)
+    license_plate: Optional[str] = Field(None, max_length=20)
     current_mileage: float = 0
-    fuel_type: str = "gasoline"
+    fuel_type: str = Field("gasoline", max_length=50)
     axle_count: Optional[int] = None
 
 
 class VehicleUpdate(BaseModel):
-    nickname: Optional[str] = None
-    vehicle_type: Optional[str] = None
-    make: Optional[str] = None
-    model: Optional[str] = None
+    nickname: Optional[str] = Field(None, max_length=100)
+    vehicle_type: Optional[str] = Field(None, max_length=50)
+    make: Optional[str] = Field(None, max_length=255)
+    model: Optional[str] = Field(None, max_length=255)
     year: Optional[int] = None
-    vin: Optional[str] = None
-    license_plate: Optional[str] = None
+    vin: Optional[str] = Field(None, max_length=17)
+    license_plate: Optional[str] = Field(None, max_length=20)
     current_mileage: Optional[float] = None
-    fuel_type: Optional[str] = None
+    fuel_type: Optional[str] = Field(None, max_length=50)
     axle_count: Optional[int] = None
     tank_size_gallons: Optional[float] = None
     specs_overrides: Optional[dict] = None
 
 
 class VINRequest(BaseModel):
-    vin: str
+    vin: str = Field(..., max_length=17)
 
 
 class VINDecodeResponse(BaseModel):
@@ -130,20 +130,20 @@ class VehicleResponse(BaseModel):
 
 
 class VehiclePartCreate(BaseModel):
-    name: str
-    part_number: Optional[str] = None
-    brand: Optional[str] = None
-    category: str = "other"
-    notes: Optional[str] = None
+    name: str = Field(..., max_length=255)
+    part_number: Optional[str] = Field(None, max_length=100)
+    brand: Optional[str] = Field(None, max_length=255)
+    category: str = Field("other", max_length=50)
+    notes: Optional[str] = Field(None, max_length=1000)
     needs_order: bool = False
 
 
 class VehiclePartUpdate(BaseModel):
-    name: Optional[str] = None
-    part_number: Optional[str] = None
-    brand: Optional[str] = None
-    category: Optional[str] = None
-    notes: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=255)
+    part_number: Optional[str] = Field(None, max_length=100)
+    brand: Optional[str] = Field(None, max_length=255)
+    category: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=1000)
     needs_order: Optional[bool] = None
 
 
@@ -168,8 +168,8 @@ class FuelEntryCreate(BaseModel):
     mileage: float
     gallons: float
     cost: float
-    location: Optional[str] = None
-    notes: Optional[str] = None
+    location: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
     octane: Optional[int] = None
 
 
@@ -195,10 +195,10 @@ class FuelEntryResponse(BaseModel):
 class MaintenanceEntryCreate(BaseModel):
     date: date
     mileage: float
-    type: str
+    type: str = Field(..., max_length=255)
     cost: float
-    service_provider: Optional[str] = None
-    notes: Optional[str] = None
+    service_provider: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class MaintenanceEntryResponse(BaseModel):
@@ -218,10 +218,10 @@ class MaintenanceEntryResponse(BaseModel):
 
 # Expense Schemas
 class ExpenseCreate(BaseModel):
-    category: str
+    category: str = Field(..., max_length=100)
     amount: float
     date: date
-    description: str
+    description: str = Field(..., max_length=500)
     expires_on: Optional[date] = None
 
 
@@ -259,7 +259,7 @@ class DocumentResponse(BaseModel):
 
 # Maintenance Reminder Schemas
 class MaintenanceReminderCreate(BaseModel):
-    service_type: str
+    service_type: str = Field(..., max_length=255)
     interval_miles: Optional[float] = None
     interval_days: Optional[int] = None
     target_mileage: Optional[float] = None
@@ -267,7 +267,7 @@ class MaintenanceReminderCreate(BaseModel):
 
 
 class MaintenanceReminderUpdate(BaseModel):
-    service_type: Optional[str] = None
+    service_type: Optional[str] = Field(None, max_length=255)
     interval_miles: Optional[float] = None
     interval_days: Optional[int] = None
     target_mileage: Optional[float] = None
@@ -342,15 +342,15 @@ class VehicleStats(BaseModel):
 class TripEntryCreate(BaseModel):
     date: date
     miles: float
-    destination: Optional[str] = None
-    notes: Optional[str] = None
+    destination: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class TripEntryUpdate(BaseModel):
     date: Optional[date] = None
     miles: Optional[float] = None
-    destination: Optional[str] = None
-    notes: Optional[str] = None
+    destination: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class TripEntryResponse(BaseModel):
@@ -374,12 +374,12 @@ class TripStats(BaseModel):
 
 # Settings Schemas
 class DBSettings(BaseModel):
-    type: str  # sqlite, postgresql, mysql
-    host: Optional[str] = None
+    type: str = Field(..., max_length=50)
+    host: Optional[str] = Field(None, max_length=255)
     port: Optional[int] = None
-    database: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
+    database: Optional[str] = Field(None, max_length=255)
+    username: Optional[str] = Field(None, max_length=255)
+    password: Optional[str] = Field(None, max_length=255)
 
 
 class DBSettingsResponse(BaseModel):
@@ -391,18 +391,16 @@ class DBSettingsResponse(BaseModel):
 
 
 class StorageSettings(BaseModel):
-    type: str = "local"          # local | s3 | webdav
-    # S3-compatible fields
-    endpoint: Optional[str] = None
-    bucket: Optional[str] = None
-    region: Optional[str] = None
-    access_key: Optional[str] = None
-    secret_key: Optional[str] = None  # write-only
-    # WebDAV fields
-    url: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None   # write-only
-    path: Optional[str] = None
+    type: str = Field("local", max_length=50)
+    endpoint: Optional[str] = Field(None, max_length=500)
+    bucket: Optional[str] = Field(None, max_length=255)
+    region: Optional[str] = Field(None, max_length=100)
+    access_key: Optional[str] = Field(None, max_length=255)
+    secret_key: Optional[str] = Field(None, max_length=255)
+    url: Optional[str] = Field(None, max_length=500)
+    username: Optional[str] = Field(None, max_length=255)
+    password: Optional[str] = Field(None, max_length=255)
+    path: Optional[str] = Field(None, max_length=500)
 
 
 class StorageSettingsResponse(BaseModel):
@@ -428,14 +426,14 @@ class IntegrationsSettingsResponse(BaseModel):
 
 # Inspection Schemas
 class InspectionItemCreate(BaseModel):
-    name: str
-    category: str = "general"
+    name: str = Field(..., max_length=255)
+    category: str = Field("general", max_length=100)
     order_index: int = 0
 
 
 class InspectionItemUpdate(BaseModel):
-    name: Optional[str] = None
-    category: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=255)
+    category: Optional[str] = Field(None, max_length=100)
     last_checked_at: Optional[datetime] = None
     order_index: Optional[int] = None
 
@@ -457,8 +455,8 @@ class TireEventCreate(BaseModel):
     event_type: Literal["install", "rotation", "pressure", "tread"]
     date: date
     mileage: float
-    brand: Optional[str] = None
-    size: Optional[str] = None
+    brand: Optional[str] = Field(None, max_length=255)
+    size: Optional[str] = Field(None, max_length=50)
     pressure_fl: Optional[float] = None
     pressure_fr: Optional[float] = None
     pressure_rl: Optional[float] = None
@@ -467,7 +465,7 @@ class TireEventCreate(BaseModel):
     tread_fr: Optional[float] = None
     tread_rl: Optional[float] = None
     tread_rr: Optional[float] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class TireEventResponse(BaseModel):

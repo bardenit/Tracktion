@@ -14,6 +14,9 @@ class User(Base):
     password_hash = Column(String(255))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    failed_login_attempts = Column(Integer, default=0)
+    last_failed_login_at = Column(DateTime, nullable=True)
+    locked_until = Column(DateTime, nullable=True)
 
     vehicles = relationship("Vehicle", back_populates="owner")
     collaborations = relationship("VehicleCollaborator", back_populates="user")
