@@ -147,7 +147,7 @@ function TankSizeRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Ve
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
           autoFocus placeholder="e.g. 26"
-        />
+        onFocus={(e) => e.target.select()} />
         <span className="text-slate-400 text-xs">gal</span>
         <button onClick={save} disabled={saving} className="text-teal-400 hover:text-teal-300 text-xs font-medium">{saving ? '...' : 'Save'}</button>
         <button onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
@@ -309,7 +309,7 @@ function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Veh
           onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
           autoFocus
           min="0"
-        />
+        onFocus={(e) => e.target.select()} />
         <button onClick={save} disabled={saving} className="text-teal-400 hover:text-teal-300 text-xs font-medium">
           {saving ? '...' : 'Save'}
         </button>
@@ -1325,7 +1325,7 @@ export default function VehicleDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Miles *</label>
-                  <input type="number" className="input-field" min="0" step="0.1" value={tripForm.miles} onChange={(e) => setTripForm((p) => ({ ...p, miles: Number(e.target.value) }))} required />
+                  <input type="number" className="input-field" min="0" step="0.1" value={tripForm.miles} onChange={(e) => setTripForm((p) => ({ ...p, miles: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
               </div>
               <div>
@@ -1515,19 +1515,19 @@ export default function VehicleDetailPage() {
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
                   <input type="number" className="input-field" min="0" value={fuelForm.mileage}
-                    onChange={(e) => setFuelForm((p) => ({ ...p, mileage: Number(e.target.value) }))} required />
+                    onChange={(e) => setFuelForm((p) => ({ ...p, mileage: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Gallons *</label>
                   <input type="number" className="input-field" min="0" step="0.001" value={fuelForm.gallons}
-                    onChange={(e) => setFuelForm((p) => ({ ...p, gallons: Number(e.target.value) }))} required />
+                    onChange={(e) => setFuelForm((p) => ({ ...p, gallons: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Cost ($) *</label>
                   <input type="number" className="input-field" min="0" step="0.01" value={fuelForm.cost}
-                    onChange={(e) => setFuelForm((p) => ({ ...p, cost: Number(e.target.value) }))} required />
+                    onChange={(e) => setFuelForm((p) => ({ ...p, cost: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
               </div>
               <div>
@@ -1766,7 +1766,7 @@ export default function VehicleDetailPage() {
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
                   <input type="number" className="input-field" min="0" value={maintForm.mileage}
-                    onChange={(e) => setMaintForm((p) => ({ ...p, mileage: Number(e.target.value) }))} required />
+                    onChange={(e) => setMaintForm((p) => ({ ...p, mileage: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
               </div>
               <div>
@@ -1811,7 +1811,7 @@ export default function VehicleDetailPage() {
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Cost ($) *</label>
                   <input type="number" className="input-field" min="0" step="0.01" value={maintForm.cost}
-                    onChange={(e) => setMaintForm((p) => ({ ...p, cost: Number(e.target.value) }))} required />
+                    onChange={(e) => setMaintForm((p) => ({ ...p, cost: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Provider</label>
@@ -1898,13 +1898,13 @@ export default function VehicleDetailPage() {
                     <label className="block text-sm text-slate-300 mb-1">Every (miles)</label>
                     <input type="number" className="input-field" min="1" placeholder="e.g. 5000"
                       value={reminderForm.interval_miles}
-                      onChange={(e) => setReminderForm((p) => ({ ...p, interval_miles: e.target.value }))} />
+                      onChange={(e) => setReminderForm((p) => ({ ...p, interval_miles: e.target.value }))} onFocus={(e) => e.target.select()} />
                   </div>
                   <div>
                     <label className="block text-sm text-slate-300 mb-1">Every (days)</label>
                     <input type="number" className="input-field" min="1" placeholder="e.g. 90"
                       value={reminderForm.interval_days}
-                      onChange={(e) => setReminderForm((p) => ({ ...p, interval_days: e.target.value }))} />
+                      onChange={(e) => setReminderForm((p) => ({ ...p, interval_days: e.target.value }))} onFocus={(e) => e.target.select()} />
                   </div>
                 </div>
               ) : (
@@ -1912,7 +1912,7 @@ export default function VehicleDetailPage() {
                   <label className="block text-sm text-slate-300 mb-1">Target odometer (miles) *</label>
                   <input type="number" className="input-field" min="1" placeholder="e.g. 50000"
                     value={reminderForm.target_mileage}
-                    onChange={(e) => setReminderForm((p) => ({ ...p, target_mileage: e.target.value }))} />
+                    onChange={(e) => setReminderForm((p) => ({ ...p, target_mileage: e.target.value }))} onFocus={(e) => e.target.select()} />
                   <p className="text-slate-500 text-xs mt-1">Current odometer: {vehicle?.current_mileage.toLocaleString()} mi</p>
                 </div>
               )}
@@ -1921,7 +1921,7 @@ export default function VehicleDetailPage() {
                 <label className="block text-sm text-slate-300 mb-1">Alert me when within (miles)</label>
                 <input type="number" className="input-field" min="1" placeholder="500"
                   value={reminderForm.reminder_miles}
-                  onChange={(e) => setReminderForm((p) => ({ ...p, reminder_miles: e.target.value }))} />
+                  onChange={(e) => setReminderForm((p) => ({ ...p, reminder_miles: e.target.value }))} onFocus={(e) => e.target.select()} />
                 {(() => {
                   const avg = avgMilesPerDay();
                   const lead = Number(reminderForm.reminder_miles) || 500;
@@ -2113,7 +2113,7 @@ export default function VehicleDetailPage() {
               <div>
                   <label className="block text-sm text-slate-300 mb-1">Amount ($) *</label>
                   <input type="number" className="input-field" min="0" step="0.01" value={expenseForm.amount}
-                    onChange={(e) => setExpenseForm((p) => ({ ...p, amount: Number(e.target.value) }))} required />
+                    onChange={(e) => setExpenseForm((p) => ({ ...p, amount: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Date *</label>
@@ -2539,7 +2539,7 @@ export default function VehicleDetailPage() {
                   <div>
                     <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
                     <input type="number" className="input-field" min="0" value={tireForm.mileage}
-                      onChange={(e) => setTireForm((p) => ({ ...p, mileage: Number(e.target.value) }))} required />
+                      onChange={(e) => setTireForm((p) => ({ ...p, mileage: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                   </div>
                 </div>
                 {tireEventType === 'install' && (
@@ -2565,7 +2565,7 @@ export default function VehicleDetailPage() {
                           <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
                           <input type="number" className="input-field" min="0" step="0.1"
                             value={String(tireForm[`pressure_${pos}` as keyof typeof tireForm] ?? '')}
-                            onChange={(e) => setTireForm((p) => ({ ...p, [`pressure_${pos}`]: e.target.value }))} />
+                            onChange={(e) => setTireForm((p) => ({ ...p, [`pressure_${pos}`]: e.target.value }))} onFocus={(e) => e.target.select()} />
                         </div>
                       ))}
                     </div>
@@ -2580,7 +2580,7 @@ export default function VehicleDetailPage() {
                           <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
                           <input type="number" className="input-field" min="0" step="1"
                             value={String(tireForm[`tread_${pos}` as keyof typeof tireForm] ?? '')}
-                            onChange={(e) => setTireForm((p) => ({ ...p, [`tread_${pos}`]: e.target.value }))} />
+                            onChange={(e) => setTireForm((p) => ({ ...p, [`tread_${pos}`]: e.target.value }))} onFocus={(e) => e.target.select()} />
                         </div>
                       ))}
                     </div>
