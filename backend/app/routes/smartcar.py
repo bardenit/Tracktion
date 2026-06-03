@@ -223,6 +223,7 @@ def unlink_vehicle(vehicle_id: int, db: Session = Depends(get_db), current_user:
 @router.post("/sync/{vehicle_id}")
 def sync_vehicle(vehicle_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     vehicle = _check_vehicle(vehicle_id, current_user, db)
+    print(f"Smartcar sync route: vehicle {vehicle.id} sc_vehicle_id={repr(vehicle.smartcar_vehicle_id)} sc_user_id={repr(vehicle.smartcar_user_id)}")
     if not vehicle.smartcar_vehicle_id:
         raise HTTPException(status_code=400, detail="Vehicle is not linked to Smartcar")
     distance = sync_vehicle_odometer(vehicle, db)
