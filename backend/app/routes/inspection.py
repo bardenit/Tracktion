@@ -1,11 +1,12 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime
 from app.database import get_db
-from app.models import User, Vehicle, InspectionItem, VehicleCollaborator
+from app.models import User, InspectionItem
 from app.schemas import InspectionItemCreate, InspectionItemUpdate, InspectionItemResponse
 from app.auth import get_current_user
+from app.deps import check_vehicle_access
 
 router = APIRouter()
 
@@ -44,39 +45,23 @@ TRAILER_DEFAULTS = [
 ]
 
 
-def _check_access(vehicle_id: int, user_id: int, db: Session) -> Vehicle:
-    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
-    is_owner = vehicle.user_id == user_id
-    is_collab = db.query(VehicleCollaborator).filter(
-        VehicleCollaborator.vehicle_id == vehicle_id,
-        VehicleCollaborator.user_id == user_id,
-    ).first() is not None
-    if not (is_owner or is_collab):
-        raise HTTPException(status_code=403, detail="Access denied")
-    return vehicle
-
-
 @router.get("/{vehicle_id}/items", response_model=List[InspectionItemResponse])
 def list_inspection_items(
     vehicle_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = _check_access(vehicle_id, current_user.id, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
     items = (
         db.query(InspectionItem)
         .filter(InspectionItem.vehicle_id == vehicle_id)
         .order_by(InspectionItem.order_index, InspectionItem.id)
         .all()
     )
-    # Seed defaults on first visit
     if not items:
         defaults = TRAILER_DEFAULTS if vehicle.vehicle_type == "trailer" else VEHICLE_DEFAULTS
         for i, (category, name) in enumerate(defaults):
-            item = InspectionItem(vehicle_id=vehicle_id, name=name, category=category, order_index=i)
-            db.add(item)
+            db.add(InspectionItem(vehicle_id=vehicle_id, name=name, category=category, order_index=i))
         db.commit()
         items = (
             db.query(InspectionItem)
@@ -94,7 +79,7 @@ def create_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     item = InspectionItem(vehicle_id=vehicle_id, **item_data.model_dump())
     db.add(item)
     db.commit()
@@ -110,7 +95,7 @@ def update_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     item = db.query(InspectionItem).filter(
         InspectionItem.id == item_id, InspectionItem.vehicle_id == vehicle_id
     ).first()
@@ -130,13 +115,13 @@ def check_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     item = db.query(InspectionItem).filter(
         InspectionItem.id == item_id, InspectionItem.vehicle_id == vehicle_id
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    item.last_checked_at = datetime.utcnow()
+    item.last_checked_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
     return item
@@ -148,7 +133,7 @@ def reset_inspection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     db.query(InspectionItem).filter(InspectionItem.vehicle_id == vehicle_id).update(
         {InspectionItem.last_checked_at: None}
     )
@@ -163,7 +148,7 @@ def delete_inspection_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     item = db.query(InspectionItem).filter(
         InspectionItem.id == item_id, InspectionItem.vehicle_id == vehicle_id
     ).first()

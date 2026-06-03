@@ -1,8 +1,9 @@
+from datetime import timedelta, date as date_type
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, Vehicle, MaintenanceEntry, MaintenanceReminder, VehicleCollaborator
+from app.models import User, MaintenanceEntry, MaintenanceReminder
 from app.schemas import (
     MaintenanceEntryCreate,
     MaintenanceEntryResponse,
@@ -11,32 +12,9 @@ from app.schemas import (
     MaintenanceReminderResponse,
 )
 from app.auth import get_current_user
+from app.deps import check_vehicle_access
 
 router = APIRouter()
-
-
-def _check_vehicle_access(vehicle_id: int, user_id: int, db: Session) -> Vehicle:
-    """Helper to check if user has access to vehicle"""
-    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
-    
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
-    
-    is_owner = vehicle.user_id == user_id
-    is_collaborator = (
-        db.query(VehicleCollaborator)
-        .filter(
-            VehicleCollaborator.vehicle_id == vehicle_id,
-            VehicleCollaborator.user_id == user_id,
-        )
-        .first()
-        is not None
-    )
-    
-    if not (is_owner or is_collaborator):
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return vehicle
 
 
 @router.post("/{vehicle_id}/entries", response_model=MaintenanceEntryResponse)
@@ -46,11 +24,8 @@ def create_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new maintenance entry"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    # Create maintenance entry
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+
     entry = MaintenanceEntry(
         vehicle_id=vehicle_id,
         date=entry_data.date,
@@ -60,37 +35,26 @@ def create_maintenance_entry(
         service_provider=entry_data.service_provider,
         notes=entry_data.notes,
     )
-    
     db.add(entry)
-    
-    # Update vehicle's current mileage
+
     vehicle.current_mileage = max(vehicle.current_mileage, entry_data.mileage)
-    
-    # Update maintenance reminder if exists
+
     reminder = (
         db.query(MaintenanceReminder)
-        .filter(
-            MaintenanceReminder.vehicle_id == vehicle_id,
-            MaintenanceReminder.service_type == entry_data.type,
-        )
+        .filter(MaintenanceReminder.vehicle_id == vehicle_id, MaintenanceReminder.service_type == entry_data.type)
         .first()
     )
-    
     if reminder:
         reminder.last_performed_mileage = entry_data.mileage
         reminder.last_performed_date = entry_data.date
         reminder.is_overdue = False
-        
-        # Calculate next due
         if reminder.interval_miles:
             reminder.next_due_mileage = entry_data.mileage + reminder.interval_miles
         if reminder.interval_days:
-            from datetime import timedelta
             reminder.next_due_date = entry_data.date + timedelta(days=reminder.interval_days)
-    
+
     db.commit()
     db.refresh(entry)
-    
     return entry
 
 
@@ -100,18 +64,13 @@ def list_maintenance_entries(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List all maintenance entries for a vehicle"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    entries = (
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    return (
         db.query(MaintenanceEntry)
         .filter(MaintenanceEntry.vehicle_id == vehicle_id)
         .order_by(MaintenanceEntry.date.desc())
         .all()
     )
-    
-    return entries
 
 
 @router.get("/{vehicle_id}/entries/{entry_id}", response_model=MaintenanceEntryResponse)
@@ -121,22 +80,12 @@ def get_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get a specific maintenance entry"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    entry = (
-        db.query(MaintenanceEntry)
-        .filter(
-            MaintenanceEntry.id == entry_id,
-            MaintenanceEntry.vehicle_id == vehicle_id,
-        )
-        .first()
-    )
-    
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    entry = db.query(MaintenanceEntry).filter(
+        MaintenanceEntry.id == entry_id, MaintenanceEntry.vehicle_id == vehicle_id
+    ).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Maintenance entry not found")
-    
     return entry
 
 
@@ -148,33 +97,22 @@ def update_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update a maintenance entry"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    entry = (
-        db.query(MaintenanceEntry)
-        .filter(
-            MaintenanceEntry.id == entry_id,
-            MaintenanceEntry.vehicle_id == vehicle_id,
-        )
-        .first()
-    )
-    
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    entry = db.query(MaintenanceEntry).filter(
+        MaintenanceEntry.id == entry_id, MaintenanceEntry.vehicle_id == vehicle_id
+    ).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Maintenance entry not found")
-    
-    # Update fields
+
     entry.date = entry_data.date
     entry.mileage = entry_data.mileage
     entry.type = entry_data.type
     entry.cost = entry_data.cost
     entry.service_provider = entry_data.service_provider
     entry.notes = entry_data.notes
-    
+
     db.commit()
     db.refresh(entry)
-    
     return entry
 
 
@@ -185,29 +123,17 @@ def delete_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a maintenance entry"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    entry = (
-        db.query(MaintenanceEntry)
-        .filter(
-            MaintenanceEntry.id == entry_id,
-            MaintenanceEntry.vehicle_id == vehicle_id,
-        )
-        .first()
-    )
-    
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    entry = db.query(MaintenanceEntry).filter(
+        MaintenanceEntry.id == entry_id, MaintenanceEntry.vehicle_id == vehicle_id
+    ).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Maintenance entry not found")
-    
     db.delete(entry)
     db.commit()
-    
     return {"message": "Maintenance entry deleted"}
 
 
-# Maintenance Reminder endpoints
 @router.post("/{vehicle_id}/reminders", response_model=MaintenanceReminderResponse)
 def create_maintenance_reminder(
     vehicle_id: int,
@@ -215,39 +141,24 @@ def create_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a maintenance reminder"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    # Check if reminder already exists for this service
-    existing = (
-        db.query(MaintenanceReminder)
-        .filter(
-            MaintenanceReminder.vehicle_id == vehicle_id,
-            MaintenanceReminder.service_type == reminder_data.service_type,
-        )
-        .first()
-    )
-    
+    check_vehicle_access(vehicle_id, current_user.id, db)
+
+    existing = db.query(MaintenanceReminder).filter(
+        MaintenanceReminder.vehicle_id == vehicle_id,
+        MaintenanceReminder.service_type == reminder_data.service_type,
+    ).first()
     if existing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Reminder for {reminder_data.service_type} already exists",
-        )
-    
-    # Seed interval reminders from existing maintenance history
+        raise HTTPException(status_code=400, detail=f"Reminder for {reminder_data.service_type} already exists")
+
     last_mileage = None
     last_date = None
-    next_due_mileage = reminder_data.target_mileage  # for target mode
+    next_due_mileage = reminder_data.target_mileage
     next_due_date = None
 
     if reminder_data.interval_miles or reminder_data.interval_days:
         last_entry = (
             db.query(MaintenanceEntry)
-            .filter(
-                MaintenanceEntry.vehicle_id == vehicle_id,
-                MaintenanceEntry.type == reminder_data.service_type,
-            )
+            .filter(MaintenanceEntry.vehicle_id == vehicle_id, MaintenanceEntry.type == reminder_data.service_type)
             .order_by(MaintenanceEntry.mileage.desc())
             .first()
         )
@@ -257,7 +168,6 @@ def create_maintenance_reminder(
             if reminder_data.interval_miles:
                 next_due_mileage = last_entry.mileage + reminder_data.interval_miles
             if reminder_data.interval_days:
-                from datetime import timedelta
                 next_due_date = last_entry.date + timedelta(days=reminder_data.interval_days)
 
     reminder = MaintenanceReminder(
@@ -272,11 +182,9 @@ def create_maintenance_reminder(
         next_due_mileage=next_due_mileage,
         next_due_date=next_due_date,
     )
-
     db.add(reminder)
     db.commit()
     db.refresh(reminder)
-
     return reminder
 
 
@@ -286,27 +194,17 @@ def list_maintenance_reminders(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List all maintenance reminders for a vehicle"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    reminders = (
-        db.query(MaintenanceReminder)
-        .filter(MaintenanceReminder.vehicle_id == vehicle_id)
-        .all()
-    )
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    reminders = db.query(MaintenanceReminder).filter(MaintenanceReminder.vehicle_id == vehicle_id).all()
 
-    from datetime import date as date_type
     today = date_type.today()
     changed = False
     for r in reminders:
-        overdue = False
-        if r.next_due_mileage and vehicle.current_mileage >= r.next_due_mileage:
-            overdue = True
-        if r.next_due_date and today >= r.next_due_date:
-            overdue = True
-        if r.target_mileage and vehicle.current_mileage >= r.target_mileage:
-            overdue = True
+        overdue = (
+            (r.next_due_mileage and vehicle.current_mileage >= r.next_due_mileage)
+            or (r.next_due_date and today >= r.next_due_date)
+            or (r.target_mileage and vehicle.current_mileage >= r.target_mileage)
+        )
         if r.is_overdue != overdue:
             r.is_overdue = overdue
             changed = True
@@ -324,30 +222,18 @@ def update_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update a maintenance reminder"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    reminder = (
-        db.query(MaintenanceReminder)
-        .filter(
-            MaintenanceReminder.id == reminder_id,
-            MaintenanceReminder.vehicle_id == vehicle_id,
-        )
-        .first()
-    )
-    
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    reminder = db.query(MaintenanceReminder).filter(
+        MaintenanceReminder.id == reminder_id, MaintenanceReminder.vehicle_id == vehicle_id
+    ).first()
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
-    
-    # Update fields
-    update_data = reminder_data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
+
+    for field, value in reminder_data.model_dump(exclude_unset=True).items():
         setattr(reminder, field, value)
-    
+
     db.commit()
     db.refresh(reminder)
-    
     return reminder
 
 
@@ -358,25 +244,14 @@ def delete_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a maintenance reminder"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    reminder = (
-        db.query(MaintenanceReminder)
-        .filter(
-            MaintenanceReminder.id == reminder_id,
-            MaintenanceReminder.vehicle_id == vehicle_id,
-        )
-        .first()
-    )
-    
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    reminder = db.query(MaintenanceReminder).filter(
+        MaintenanceReminder.id == reminder_id, MaintenanceReminder.vehicle_id == vehicle_id
+    ).first()
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
-    
     db.delete(reminder)
     db.commit()
-    
     return {"message": "Reminder deleted"}
 
 
@@ -386,28 +261,18 @@ def get_maintenance_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get maintenance statistics for a vehicle"""
-    
-    vehicle = _check_vehicle_access(vehicle_id, current_user.id, db)
-    
-    entries = (
-        db.query(MaintenanceEntry)
-        .filter(MaintenanceEntry.vehicle_id == vehicle_id)
-        .all()
-    )
-    
-    total_cost = sum(e.cost for e in entries)
-    
-    # Group by type
-    by_type = {}
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    entries = db.query(MaintenanceEntry).filter(MaintenanceEntry.vehicle_id == vehicle_id).all()
+
+    by_type: dict = {}
     for entry in entries:
         if entry.type not in by_type:
             by_type[entry.type] = {"count": 0, "total_cost": 0}
         by_type[entry.type]["count"] += 1
         by_type[entry.type]["total_cost"] += entry.cost
-    
+
     return {
-        "total_cost": total_cost,
+        "total_cost": sum(e.cost for e in entries),
         "entries_count": len(entries),
         "by_type": by_type,
     }

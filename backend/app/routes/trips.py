@@ -3,20 +3,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, Vehicle, TripEntry
+from app.models import User, TripEntry
 from app.schemas import TripEntryCreate, TripEntryUpdate, TripEntryResponse, TripStats
 from app.auth import get_current_user
+from app.deps import check_vehicle_access
 
 router = APIRouter()
-
-
-def get_vehicle_or_403(vehicle_id: int, user: User, db: Session) -> Vehicle:
-    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
-    if vehicle.user_id != user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return vehicle
 
 
 @router.post("/{vehicle_id}/entries", response_model=TripEntryResponse)
@@ -26,7 +18,7 @@ def create_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = get_vehicle_or_403(vehicle_id, current_user, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
     trip = TripEntry(vehicle_id=vehicle_id, **trip_data.model_dump())
     db.add(trip)
     vehicle.current_mileage = (vehicle.current_mileage or 0) + trip_data.miles
@@ -41,7 +33,7 @@ def list_trips(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_vehicle_or_403(vehicle_id, current_user, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     return db.query(TripEntry).filter(TripEntry.vehicle_id == vehicle_id).order_by(TripEntry.date.desc()).all()
 
 
@@ -53,7 +45,7 @@ def update_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = get_vehicle_or_403(vehicle_id, current_user, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
     trip = db.query(TripEntry).filter(TripEntry.id == trip_id, TripEntry.vehicle_id == vehicle_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -76,7 +68,7 @@ def delete_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = get_vehicle_or_403(vehicle_id, current_user, db)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
     trip = db.query(TripEntry).filter(TripEntry.id == trip_id, TripEntry.vehicle_id == vehicle_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -92,7 +84,7 @@ def trip_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_vehicle_or_403(vehicle_id, current_user, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     total = db.query(func.sum(TripEntry.miles), func.count(TripEntry.id), func.max(TripEntry.date)) \
               .filter(TripEntry.vehicle_id == vehicle_id).first()
     return TripStats(

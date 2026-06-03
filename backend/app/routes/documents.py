@@ -1,16 +1,16 @@
+import io
+import os
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
-import io
-import os
-from datetime import datetime
 from app.database import get_db
-from app.models import User, Vehicle, Document, VehicleCollaborator
+from app.models import User, Document
 from app.schemas import DocumentResponse, VehiclePhotoResponse
 from app.auth import get_current_user
-from app.storage import get_storage, LocalStorage
-from app.data_config import DATA_DIR
+from app.deps import check_vehicle_access
+from app.storage import get_storage
 
 router = APIRouter()
 
@@ -43,19 +43,9 @@ def _media_type(filename: str) -> str:
     return 'application/octet-stream'
 
 
-def _check_vehicle_access(vehicle_id: int, user_id: int, db: Session) -> Vehicle:
-    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
-    is_owner = vehicle.user_id == user_id
-    is_collaborator = (
-        db.query(VehicleCollaborator)
-        .filter(VehicleCollaborator.vehicle_id == vehicle_id, VehicleCollaborator.user_id == user_id)
-        .first() is not None
-    )
-    if not (is_owner or is_collaborator):
-        raise HTTPException(status_code=403, detail="Access denied")
-    return vehicle
+def _safe_filename(filename: str | None, fallback: str = 'file') -> str:
+    name = os.path.basename(filename or fallback).replace(" ", "_") or fallback
+    return name or fallback
 
 
 @router.post("/{vehicle_id}/documents", response_model=DocumentResponse)
@@ -66,7 +56,7 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
 
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="File type not allowed. Allowed: PDF, Images, Word docs")
@@ -75,8 +65,8 @@ async def upload_document(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large. Maximum size is 20MB")
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    safe_name = (file.filename or 'file').replace(" ", "_")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = _safe_filename(file.filename)
     relative_path = f"user_{current_user.id}/vehicle_{vehicle_id}/{timestamp}_{safe_name}"
 
     get_storage().save(data, relative_path, file.content_type or 'application/octet-stream')
@@ -100,7 +90,7 @@ def list_documents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     return (
         db.query(Document)
         .filter(Document.vehicle_id == vehicle_id, Document.document_type != "vehicle_photo")
@@ -116,7 +106,7 @@ def download_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     doc = db.query(Document).filter(Document.id == document_id, Document.vehicle_id == vehicle_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -142,7 +132,7 @@ def delete_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     doc = db.query(Document).filter(Document.id == document_id, Document.vehicle_id == vehicle_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -161,7 +151,7 @@ async def upload_vehicle_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
 
     if file.content_type not in IMAGE_TYPES and not (file.filename or '').lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif')):
         raise HTTPException(status_code=400, detail="Image files only (JPEG, PNG, WebP)")
@@ -170,8 +160,8 @@ async def upload_vehicle_photo(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 20 MB)")
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    safe_name = (file.filename or 'photo').replace(" ", "_")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = _safe_filename(file.filename, 'photo')
     relative_path = f"user_{current_user.id}/vehicle_{vehicle_id}/photo_{timestamp}_{safe_name}"
     get_storage().save(data, relative_path, file.content_type or 'image/jpeg')
 
@@ -193,7 +183,7 @@ def list_vehicle_photos(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     return (
         db.query(Document)
         .filter(Document.vehicle_id == vehicle_id, Document.document_type == "vehicle_photo")
@@ -209,7 +199,7 @@ def delete_vehicle_photo_by_id(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     doc = db.query(Document).filter(
         Document.id == photo_id,
         Document.vehicle_id == vehicle_id,
@@ -232,7 +222,7 @@ def get_vehicle_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     doc = (
         db.query(Document)
         .filter(Document.vehicle_id == vehicle_id, Document.document_type == 'vehicle_photo')
@@ -258,7 +248,7 @@ def delete_vehicle_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _check_vehicle_access(vehicle_id, current_user.id, db)
+    check_vehicle_access(vehicle_id, current_user.id, db)
     doc = (
         db.query(Document)
         .filter(Document.vehicle_id == vehicle_id, Document.document_type == 'vehicle_photo')

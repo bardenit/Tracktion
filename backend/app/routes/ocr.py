@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from app.auth import get_current_user
 from app.models import User
@@ -60,27 +61,21 @@ async def _scan(file: UploadFile, prompt: str) -> dict:
             }],
         )
         raw = msg.content[0].text.strip()
-        # Strip markdown code fences if model wraps response
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         return json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(status_code=422, detail="Could not parse receipt data. Try a clearer photo.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {e}")
+    except Exception:
+        logging.exception("OCR scan failed")
+        raise HTTPException(status_code=500, detail="OCR processing failed. Please try again.")
 
 
 @router.post("/fuel")
-async def ocr_fuel(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
+async def ocr_fuel(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     return await _scan(file, _FUEL_PROMPT)
 
 
 @router.post("/expense")
-async def ocr_expense(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
+async def ocr_expense(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     return await _scan(file, _EXPENSE_PROMPT)
