@@ -16,7 +16,8 @@ router = APIRouter()
 
 SMARTCAR_AUTH_URL = "https://connect.smartcar.com/oauth/authorize"
 SMARTCAR_TOKEN_URL = "https://iam.smartcar.com/oauth2/token"
-SMARTCAR_API_BASE = "https://api.smartcar.com/v2.0"
+SMARTCAR_API_BASE = "https://api.smartcar.com/v2.0"       # v2 — still used for vehicle info fetch
+SMARTCAR_V3_BASE = "https://vehicle.api.smartcar.com/v3"  # v3 — used for vehicle signals
 SMARTCAR_MGMT_BASE = "https://management.smartcar.com/v2.0"
 
 
@@ -90,7 +91,11 @@ def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
         "sc-user-id": vehicle.smartcar_user_id,
     }
     try:
-        r = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vehicle.smartcar_vehicle_id}/odometer", headers=headers, timeout=15)
+        r = httpx.get(
+            f"{SMARTCAR_V3_BASE}/vehicles/{vehicle.smartcar_vehicle_id}/signals/odometer-traveleddistance",
+            headers=headers,
+            timeout=15,
+        )
     except Exception as e:
         print(f"Smartcar sync vehicle {vehicle.id}: request error — {e}")
         return None
@@ -99,8 +104,14 @@ def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
         print(f"Smartcar sync vehicle {vehicle.id}: odometer API returned {r.status_code} — {r.text}")
         return None
 
-    distance = r.json().get("distance")
-    if distance is not None and distance > vehicle.current_mileage:
+    body = r.json()
+    raw = body.get("value")
+    if raw is None:
+        return None
+    # Convert km → miles if the API didn't honour the imperial header
+    unit = body.get("unit", "mi")
+    distance = raw * 0.621371 if unit == "km" else raw
+    if distance > vehicle.current_mileage:
         vehicle.current_mileage = distance
     vehicle.smartcar_last_synced_at = datetime.now(timezone.utc)
     db.commit()
