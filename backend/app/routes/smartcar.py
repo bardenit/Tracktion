@@ -104,14 +104,13 @@ def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
         print(f"Smartcar sync vehicle {vehicle.id}: odometer API returned {r.status_code} — {r.text}")
         return None
 
-    print(f"Smartcar sync vehicle {vehicle.id}: v3 response {r.status_code} — {r.text[:500]}")
     body = r.json()
-    raw = body.get("value")
+    signal_body = body.get("data", {}).get("attributes", {}).get("body", {})
+    raw = signal_body.get("value")
     if raw is None:
-        print(f"Smartcar sync vehicle {vehicle.id}: no 'value' field in response, keys={list(body.keys())}")
+        print(f"Smartcar sync vehicle {vehicle.id}: unexpected v3 response — {r.text[:300]}")
         return None
-    # Convert km → miles if the API didn't honour the imperial header
-    unit = body.get("unit", "mi")
+    unit = signal_body.get("unit", "mi")
     distance = raw * 0.621371 if unit == "km" else raw
     if distance > vehicle.current_mileage:
         vehicle.current_mileage = distance
@@ -225,7 +224,6 @@ def unlink_vehicle(vehicle_id: int, db: Session = Depends(get_db), current_user:
 @router.post("/sync/{vehicle_id}")
 def sync_vehicle(vehicle_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     vehicle = _check_vehicle(vehicle_id, current_user, db)
-    print(f"Smartcar sync route: vehicle {vehicle.id} sc_vehicle_id={repr(vehicle.smartcar_vehicle_id)} sc_user_id={repr(vehicle.smartcar_user_id)}")
     if not vehicle.smartcar_vehicle_id:
         raise HTTPException(status_code=400, detail="Vehicle is not linked to Smartcar")
     distance = sync_vehicle_odometer(vehicle, db)
