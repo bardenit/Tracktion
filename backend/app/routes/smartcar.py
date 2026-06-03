@@ -104,9 +104,11 @@ def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
         print(f"Smartcar sync vehicle {vehicle.id}: odometer API returned {r.status_code} — {r.text}")
         return None
 
+    print(f"Smartcar sync vehicle {vehicle.id}: v3 response {r.status_code} — {r.text[:500]}")
     body = r.json()
     raw = body.get("value")
     if raw is None:
+        print(f"Smartcar sync vehicle {vehicle.id}: no 'value' field in response, keys={list(body.keys())}")
         return None
     # Convert km → miles if the API didn't honour the imperial header
     unit = body.get("unit", "mi")
