@@ -71,12 +71,17 @@ def _check_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
 
 def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
     """Fetch odometer from Smartcar and update vehicle mileage. Returns miles or None on failure."""
-    if not vehicle.smartcar_vehicle_id or not vehicle.smartcar_user_id:
+    if not vehicle.smartcar_vehicle_id:
+        print(f"Smartcar sync vehicle {vehicle.id}: no smartcar_vehicle_id")
+        return None
+    if not vehicle.smartcar_user_id:
+        print(f"Smartcar sync vehicle {vehicle.id}: no smartcar_user_id — vehicle needs to be re-linked")
         return None
     try:
         creds = _smartcar_creds()
         access_token = _get_app_token(creds)
-    except Exception:
+    except Exception as e:
+        print(f"Smartcar sync vehicle {vehicle.id}: token error — {e}")
         return None
 
     headers = {
@@ -86,10 +91,12 @@ def sync_vehicle_odometer(vehicle: Vehicle, db: Session) -> Optional[float]:
     }
     try:
         r = httpx.get(f"{SMARTCAR_API_BASE}/vehicles/{vehicle.smartcar_vehicle_id}/odometer", headers=headers, timeout=15)
-    except Exception:
+    except Exception as e:
+        print(f"Smartcar sync vehicle {vehicle.id}: request error — {e}")
         return None
 
     if r.status_code != 200:
+        print(f"Smartcar sync vehicle {vehicle.id}: odometer API returned {r.status_code} — {r.text}")
         return None
 
     distance = r.json().get("distance")
@@ -209,7 +216,7 @@ def sync_vehicle(vehicle_id: int, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=400, detail="Vehicle is not linked to Smartcar")
     distance = sync_vehicle_odometer(vehicle, db)
     if distance is None:
-        raise HTTPException(status_code=502, detail="Smartcar sync failed — check credentials or vehicle connection")
+        raise HTTPException(status_code=400, detail="Smartcar sync failed — check container logs for details")
     return {
         "mileage": distance,
         "synced_at": vehicle.smartcar_last_synced_at.isoformat() if vehicle.smartcar_last_synced_at else None,
