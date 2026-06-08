@@ -22,18 +22,17 @@ body {
   color: #e2e8f0;
 }
 
-/* Subtle tire-tread brand texture fixed behind all content */
+/* Subtle seamless tire-tread brand tile fixed behind all content */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background-image: url('/tread-texture.png');
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% auto;
-  opacity: 0.2;
+  background-image: url('/tread-tile.png');
+  background-repeat: repeat;
+  background-size: 280px auto;
+  opacity: 0.35;
 }
 
 #root {
