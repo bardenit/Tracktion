@@ -53,6 +53,7 @@ class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private isRefreshing = false;
+  private refreshQueue: Array<(token: string | null) => void> = [];
   private onLogoutCallback: (() => void) | null = null;
 
   setOnLogout(cb: () => void) {
@@ -82,20 +83,35 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
-        if (error.response?.status === 401 && this.refreshToken && !this.isRefreshing) {
+        if (error.response?.status === 401 && this.refreshToken) {
+          const originalConfig = error.config;
+
+          if (this.isRefreshing) {
+            // Queue this request until the in-flight refresh completes
+            return new Promise((resolve, reject) => {
+              this.refreshQueue.push((token) => {
+                if (!token) { reject(error); return; }
+                originalConfig.headers.Authorization = `Bearer ${token}`;
+                resolve(this.client(originalConfig));
+              });
+            });
+          }
+
           this.isRefreshing = true;
           try {
             const response = await this.refreshAccessToken();
             this.accessToken = response.access_token;
             this.refreshToken = response.refresh_token;
             this.saveTokens();
+            this.refreshQueue.forEach((cb) => cb(this.accessToken));
+            this.refreshQueue = [];
             this.isRefreshing = false;
 
-            // Retry original request
-            const originalConfig = error.config;
             originalConfig.headers.Authorization = `Bearer ${this.accessToken}`;
             return this.client(originalConfig);
           } catch {
+            this.refreshQueue.forEach((cb) => cb(null));
+            this.refreshQueue = [];
             this.isRefreshing = false;
             this.logout();
           }
