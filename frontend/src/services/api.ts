@@ -11,8 +11,13 @@ function resizeImageForUpload(
   maxDim: number,
   quality: number,
   filename: string,
+  preserveAlpha = false,
 ): Promise<File> {
   if (!file.type.startsWith('image/')) return Promise.resolve(file);
+
+  // Keep PNG transparency intact (JPEG has no alpha channel and would
+  // flatten transparent areas onto black).
+  const asPng = preserveAlpha && file.type === 'image/png';
 
   const resize = new Promise<File>((resolve, reject) => {
     const img = new Image();
@@ -29,12 +34,14 @@ function resizeImageForUpload(
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('No 2d context')); return; }
         ctx.drawImage(img, 0, 0, w, h);
+        const outType = asPng ? 'image/png' : 'image/jpeg';
+        const outName = asPng ? filename.replace(/\.jpe?g$/i, '.png') : filename;
         canvas.toBlob(
           (blob) => blob
-            ? resolve(new File([blob], filename, { type: 'image/jpeg' }))
+            ? resolve(new File([blob], outName, { type: outType }))
             : reject(new Error('toBlob returned null')),
-          'image/jpeg',
-          quality,
+          outType,
+          asPng ? undefined : quality,
         );
       } catch (err) {
         reject(err);
@@ -554,7 +561,7 @@ class ApiClient {
   }
 
   async uploadVehiclePhoto(vehicleId: number, file: File): Promise<void> {
-    const resized = await resizeImageForUpload(file, 1200, 0.80, 'photo.jpg');
+    const resized = await resizeImageForUpload(file, 1200, 0.80, 'photo.jpg', true);
     const form = new FormData();
     form.append('file', resized);
     await this.client.post(`/documents/${vehicleId}/photo`, form, {
