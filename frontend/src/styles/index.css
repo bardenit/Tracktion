@@ -18,8 +18,22 @@ body {
     'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(to bottom right, #1a1a1a, #232327);
+  /* Charcoal base, darkest in the lower-left */
+  background: linear-gradient(to top right, #141414, #201d1b 70%, #241f1c);
   color: #e2e8f0;
+}
+
+/* Warm orange glow anchored to the top-right of the viewport */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(125% 110% at 100% 0%,
+    rgba(255, 106, 0, 0.30) 0%,
+    rgba(255, 106, 0, 0.08) 30%,
+    transparent 56%);
 }
 
 /* Subtle seamless tire-tread brand tile fixed behind all content */
