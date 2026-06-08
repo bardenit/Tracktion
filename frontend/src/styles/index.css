@@ -18,8 +18,22 @@ body {
     'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(to bottom right, #0f172a, #1e293b);
+  background: linear-gradient(to bottom right, #1a1a1a, #232327);
   color: #e2e8f0;
+}
+
+/* Subtle tire-tread brand texture fixed behind all content */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url('/tread-texture.png');
+  background-repeat: no-repeat;
+  background-position: bottom center;
+  background-size: 140% auto;
+  opacity: 0.12;
 }
 
 #root {
@@ -32,16 +46,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: #232327;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: #3a3a40;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: #52525b;
 }
 
 /* Custom button styles */

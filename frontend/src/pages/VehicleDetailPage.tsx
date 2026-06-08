@@ -2447,7 +2447,7 @@ export default function VehicleDetailPage() {
             setSaving(false);
           }
         }} className="space-y-3">
-          <p className="text-slate-400 text-xs">Overridden values shown in teal on the summary tab.</p>
+          <p className="text-slate-400 text-xs">Overridden values shown in orange on the summary tab.</p>
           {([
             ['engine_model', 'Engine Model'],
             ['engine_displacement_l', 'Displacement (L)'],

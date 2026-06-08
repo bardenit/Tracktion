@@ -14,16 +14,16 @@ interface Props {
   tripEntries: TripEntry[];
 }
 
-const TEAL = '#14b8a6';
+const ORANGE = '#ff6a00';
 const AMBER = '#f59e0b';
 const INDIGO = '#6366f1';
 const BLUE = '#3b82f6';
 const RED = '#ef4444';
 
-const CHART_COLORS = [TEAL, AMBER, INDIGO, BLUE, RED];
+const CHART_COLORS = [ORANGE, AMBER, INDIGO, BLUE, RED];
 
 const AXIS = { fill: '#94a3b8', fontSize: 11 };
-const GRID = '#1e293b';
+const GRID = '#2f2f35';
 
 function fmtMonth(ym: string) {
   const [y, m] = ym.split('-');
@@ -60,7 +60,7 @@ function ChartCard({ title, children, empty }: { title: string; children: React.
 }
 
 const tooltipStyle = {
-  contentStyle: { background: '#1e293b', border: '1px solid #334155', borderRadius: 6, fontSize: 12 },
+  contentStyle: { background: '#232327', border: '1px solid #3a3a40', borderRadius: 6, fontSize: 12 },
   labelStyle: { color: '#cbd5e1' },
   itemStyle: { color: '#f1f5f9' },
 };
@@ -153,7 +153,7 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
               <XAxis dataKey="month" tick={AXIS} />
               <YAxis allowDecimals={false} tick={AXIS} />
               <Tooltip {...tooltipStyle} formatter={(v: number) => [v, 'Trips']} />
-              <Bar dataKey="value" fill={TEAL} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="value" fill={ORANGE} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -194,7 +194,7 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
             <XAxis dataKey="date" tick={AXIS} />
             <YAxis tick={AXIS} domain={['auto', 'auto']} />
             <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v} MPG`, 'Fuel Economy']} />
-            <Line type="monotone" dataKey="mpg" stroke={TEAL} strokeWidth={2} dot={{ r: 3, fill: TEAL }} activeDot={{ r: 5 }} />
+            <Line type="monotone" dataKey="mpg" stroke={ORANGE} strokeWidth={2} dot={{ r: 3, fill: ORANGE }} activeDot={{ r: 5 }} />
           </LineChart>
         </ResponsiveContainer>
       </ChartCard>
@@ -206,7 +206,7 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
             <XAxis dataKey="month" tick={AXIS} />
             <YAxis tick={AXIS} />
             <Tooltip {...tooltipStyle} formatter={(v: number) => [`$${v.toFixed(2)}`, 'Fuel Cost']} />
-            <Bar dataKey="value" fill={TEAL} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="value" fill={ORANGE} radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>

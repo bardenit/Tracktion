@@ -66,6 +66,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-slate-800 rounded-lg shadow-xl p-8 border border-slate-700">
+        <img src="/tracktion-mark.png" alt="Tracktion" className="h-20 w-20 object-contain mx-auto mb-5" />
         {mode === 'setup' ? (
           <>
             <h1 className="text-3xl font-bold text-white mb-1">Welcome to Tracktion</h1>

@@ -32,7 +32,8 @@ export default function TopNav() {
       style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <Link to="/" className="text-teal-400 font-bold text-lg tracking-tight">
+          <Link to="/" className="flex items-center gap-2 text-teal-400 font-bold text-lg tracking-tight">
+            <img src="/tracktion-mark.png" alt="" className="h-7 w-7 object-contain" />
             Tracktion
           </Link>
           <div className="hidden sm:flex items-center gap-5">
