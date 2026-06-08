@@ -1,4 +1,4 @@
-const CACHE = 'tracktion-v3';
+const CACHE = 'tracktion-v4';
 const STATIC_EXTS = ['.js', '.css', '.woff2', '.woff', '.ttf', '.svg', '.png', '.jpg', '.ico'];
 
 function isStaticAsset(url) {

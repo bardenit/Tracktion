@@ -32,7 +32,7 @@ body::before {
   background-image: url('/tread-texture.png');
   background-repeat: no-repeat;
   background-position: center;
-  background-size: auto 140%;
+  background-size: 100% auto;
   opacity: 0.2;
 }
 
