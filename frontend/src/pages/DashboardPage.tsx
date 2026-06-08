@@ -245,7 +245,7 @@ export default function DashboardPage() {
               {/* Quick actions — vehicles only (trailers only shown when they have alerts, no need for clutter) */}
               {!isTrailer && (
                 <div className="flex gap-2">
-                  <button onClick={() => navigate(`/vehicles/${vehicle.id}?tab=fuel`)}
+                  <button onClick={() => navigate(`/vehicles/${vehicle.id}?tab=fuel&action=add`)}
                     className="bg-slate-700 hover:bg-slate-600 text-white text-xs py-1.5 px-3 rounded transition-colors">
                     Log Fuel
                   </button>

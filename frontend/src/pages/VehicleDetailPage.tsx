@@ -546,6 +546,16 @@ export default function VehicleDetailPage() {
     setFuelModal(true);
   };
 
+  useEffect(() => {
+    if (searchParams.get('action') === 'add' && searchParams.get('tab') === 'fuel' && !loading) {
+      setEditFuel(null);
+      setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
+      setFormError('');
+      setFuelModal(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
   const openFuelEdit = (e: FuelEntry) => {
     setEditFuel(e);
     setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '', octane: e.octane ? String(e.octane) : '' });
