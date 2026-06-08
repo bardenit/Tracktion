@@ -31,9 +31,9 @@ body::before {
   pointer-events: none;
   background-image: url('/tread-texture.png');
   background-repeat: no-repeat;
-  background-position: bottom center;
-  background-size: 140% auto;
-  opacity: 0.12;
+  background-position: center;
+  background-size: auto 140%;
+  opacity: 0.2;
 }
 
 #root {
