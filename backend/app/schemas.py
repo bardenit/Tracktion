@@ -129,13 +129,23 @@ class VehicleResponse(BaseModel):
         from_attributes = True
 
 
+VALID_ORDER_STATUSES = {'needs_order', 'ordered', 'received'}
+
+
 class VehiclePartCreate(BaseModel):
     name: str = Field(..., max_length=255)
     part_number: Optional[str] = Field(None, max_length=100)
     brand: Optional[str] = Field(None, max_length=255)
     category: str = Field("other", max_length=50)
     notes: Optional[str] = Field(None, max_length=1000)
-    needs_order: bool = False
+    order_status: Optional[str] = None
+
+    @field_validator('order_status')
+    @classmethod
+    def validate_order_status(cls, v):
+        if v is not None and v not in VALID_ORDER_STATUSES:
+            raise ValueError(f'order_status must be one of {VALID_ORDER_STATUSES}')
+        return v
 
 
 class VehiclePartUpdate(BaseModel):
@@ -144,7 +154,14 @@ class VehiclePartUpdate(BaseModel):
     brand: Optional[str] = Field(None, max_length=255)
     category: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = Field(None, max_length=1000)
-    needs_order: Optional[bool] = None
+    order_status: Optional[str] = None
+
+    @field_validator('order_status')
+    @classmethod
+    def validate_order_status(cls, v):
+        if v is not None and v not in VALID_ORDER_STATUSES:
+            raise ValueError(f'order_status must be one of {VALID_ORDER_STATUSES}')
+        return v
 
 
 class VehiclePartResponse(BaseModel):
@@ -155,7 +172,7 @@ class VehiclePartResponse(BaseModel):
     brand: Optional[str] = None
     category: str
     notes: Optional[str] = None
-    needs_order: bool = False
+    order_status: Optional[str] = None
     created_at: datetime
 
     class Config:

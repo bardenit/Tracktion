@@ -187,6 +187,7 @@ class VehiclePart(Base):
     category = Column(String(50), default="other")
     notes = Column(Text, nullable=True)
     needs_order = Column(Boolean, default=False)
+    order_status = Column(String(20), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

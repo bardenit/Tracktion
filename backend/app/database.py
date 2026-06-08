@@ -44,6 +44,9 @@ def run_migrations():
         f"ALTER TABLE vehicle_parts {add_col} needs_order BOOLEAN DEFAULT FALSE",
         f"ALTER TABLE fuel_entries {add_col} octane INTEGER",
         f"ALTER TABLE vehicles {add_col} tank_size_gallons FLOAT",
+        f"ALTER TABLE vehicle_parts {add_col} order_status VARCHAR(20)",
+        # Migrate existing needs_order=true rows
+        "UPDATE vehicle_parts SET order_status = 'needs_order' WHERE needs_order = true AND order_status IS NULL",
 
         f"""CREATE TABLE IF NOT EXISTS inspection_items (
             id {"SERIAL" if is_pg else "INTEGER"} PRIMARY KEY {"" if is_pg else "AUTOINCREMENT"},

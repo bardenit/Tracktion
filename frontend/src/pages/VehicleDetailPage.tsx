@@ -418,7 +418,7 @@ export default function VehicleDetailPage() {
   const [reminderTrigger, setReminderTrigger] = useState<'interval' | 'target'>('interval');
   const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
   const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '', expires_on: '' });
-  const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '', needs_order: false });
+  const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '', order_status: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docType, setDocType] = useState('registration');
 
@@ -2152,7 +2152,7 @@ export default function VehicleDetailPage() {
               </div>
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
-                  {saving ? 'Saving...' : 'Add Expense'}
+                  {saving ? 'Saving...' : editExpense ? 'Save Changes' : 'Add Expense'}
                 </button>
                 <button type="button" onClick={() => setExpenseModal(false)} className="btn-secondary flex-1">
                   Cancel
@@ -2262,7 +2262,7 @@ export default function VehicleDetailPage() {
             <h2 className="text-lg font-semibold text-white">Parts & Part Numbers</h2>
             <button onClick={() => {
               setEditPart(null);
-              setPartForm({ name: '', part_number: '', brand: '', category: 'filters', notes: '', needs_order: false });
+              setPartForm({ name: '', part_number: '', brand: '', category: 'filters', notes: '', order_status: '' });
               setFormError('');
               setPartModal(true);
             }} className="btn-primary text-sm">+ Add Part</button>
@@ -2273,21 +2273,36 @@ export default function VehicleDetailPage() {
           ) : (
             <div className="space-y-3">
               {/* Shopping list */}
-              {parts.some((p) => p.needs_order) && (
+              {parts.some((p) => p.order_status === 'needs_order' || p.order_status === 'ordered') && (
                 <div className="card border border-amber-700/50 bg-amber-900/10">
                   <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Shopping List</h3>
                   <div className="space-y-2">
-                    {parts.filter((p) => p.needs_order).map((p) => (
-                      <div key={p.id} className="flex items-center justify-between text-sm">
-                        <div className="min-w-0">
+                    {parts.filter((p) => p.order_status === 'needs_order' || p.order_status === 'ordered').map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-sm gap-3">
+                        <div className="min-w-0 flex-1">
                           <span className="text-white font-medium">{p.name}</span>
                           {p.brand && <span className="text-slate-400 ml-2">{p.brand}</span>}
                           {p.part_number && <span className="font-mono text-teal-300 ml-2">#{p.part_number}</span>}
+                          {p.order_status === 'ordered' && <span className="ml-2 text-xs bg-teal-900/40 text-teal-400 border border-teal-700/50 px-1.5 py-0.5 rounded">Ordered</span>}
                         </div>
-                        <button onClick={async () => {
-                          await apiClient.updatePart(id, p.id, { needs_order: false });
-                          loadParts();
-                        }} className="text-xs text-amber-400 hover:text-amber-300 ml-4 flex-shrink-0">Got it</button>
+                        <div className="flex gap-2 flex-shrink-0">
+                          {p.order_status === 'needs_order' && (
+                            <button onClick={async () => {
+                              await apiClient.updatePart(id, p.id, { order_status: 'ordered' });
+                              loadParts();
+                            }} className="text-xs text-teal-400 hover:text-teal-300 px-2 py-0.5 rounded border border-teal-700/50 hover:bg-teal-900/30 transition-colors">Mark Ordered</button>
+                          )}
+                          {p.order_status === 'ordered' && (
+                            <button onClick={async () => {
+                              await apiClient.updatePart(id, p.id, { order_status: 'received' });
+                              loadParts();
+                            }} className="text-xs text-green-400 hover:text-green-300 px-2 py-0.5 rounded border border-green-700/50 hover:bg-green-900/30 transition-colors">Mark Received</button>
+                          )}
+                          <button onClick={async () => {
+                            await apiClient.updatePart(id, p.id, { order_status: null });
+                            loadParts();
+                          }} className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1">✕</button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2305,7 +2320,9 @@ export default function VehicleDetailPage() {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <p className="text-white font-medium">{p.name}</p>
-                              {p.needs_order && <span className="text-xs bg-amber-900/40 text-amber-400 border border-amber-700/50 px-1.5 py-0.5 rounded">Need to order</span>}
+                              {p.order_status === 'needs_order' && <span className="text-xs bg-amber-900/40 text-amber-400 border border-amber-700/50 px-1.5 py-0.5 rounded">Need to order</span>}
+                              {p.order_status === 'ordered' && <span className="text-xs bg-teal-900/40 text-teal-400 border border-teal-700/50 px-1.5 py-0.5 rounded">Ordered</span>}
+                              {p.order_status === 'received' && <span className="text-xs bg-green-900/40 text-green-400 border border-green-700/50 px-1.5 py-0.5 rounded">Received</span>}
                             </div>
                             <div className="flex flex-wrap gap-3 mt-0.5 text-slate-400">
                               {p.brand && <span>{p.brand}</span>}
@@ -2315,14 +2332,15 @@ export default function VehicleDetailPage() {
                           </div>
                           <div className="flex gap-2 flex-shrink-0 items-center">
                             <button onClick={async () => {
-                              await apiClient.updatePart(id, p.id, { needs_order: !p.needs_order });
+                              const next = p.order_status === 'needs_order' ? null : 'needs_order';
+                              await apiClient.updatePart(id, p.id, { order_status: next });
                               loadParts();
-                            }} className={`text-xs transition-colors ${p.needs_order ? 'text-amber-400 hover:text-amber-300' : 'text-slate-500 hover:text-amber-400'}`} title={p.needs_order ? 'Mark as available' : 'Add to shopping list'}>
-                              {p.needs_order ? '★' : '☆'}
+                            }} className={`text-xs transition-colors ${p.order_status === 'needs_order' ? 'text-amber-400 hover:text-amber-300' : p.order_status === 'ordered' ? 'text-teal-400' : 'text-slate-500 hover:text-amber-400'}`} title={p.order_status ? 'Remove from shopping list' : 'Add to shopping list'}>
+                              {p.order_status === 'needs_order' || p.order_status === 'ordered' ? '★' : '☆'}
                             </button>
                             <button onClick={() => {
                               setEditPart(p);
-                              setPartForm({ name: p.name, part_number: p.part_number || '', brand: p.brand || '', category: p.category, notes: p.notes || '', needs_order: p.needs_order });
+                              setPartForm({ name: p.name, part_number: p.part_number || '', brand: p.brand || '', category: p.category, notes: p.notes || '', order_status: p.order_status || '' });
                               setFormError('');
                               setPartModal(true);
                             }} className="text-slate-400 hover:text-white transition-colors text-xs">Edit</button>
@@ -2348,7 +2366,7 @@ export default function VehicleDetailPage() {
               setSaving(true);
               setFormError('');
               try {
-                const payload = { ...partForm, part_number: partForm.part_number || undefined, brand: partForm.brand || undefined, notes: partForm.notes || undefined, needs_order: partForm.needs_order };
+                const payload = { ...partForm, part_number: partForm.part_number || undefined, brand: partForm.brand || undefined, notes: partForm.notes || undefined, order_status: partForm.order_status || null };
                 if (editPart) {
                   await apiClient.updatePart(id, editPart.id, payload);
                 } else {
@@ -2389,9 +2407,14 @@ export default function VehicleDetailPage() {
                   <label className="block text-sm text-slate-300 mb-1">Notes</label>
                   <input className="input-field" placeholder="Optional notes" value={partForm.notes} onChange={(e) => setPartForm((p) => ({ ...p, notes: e.target.value }))} />
                 </div>
-                <div className="col-span-2 flex items-center gap-2">
-                  <input type="checkbox" id="needs_order" checked={partForm.needs_order} onChange={(e) => setPartForm((p) => ({ ...p, needs_order: e.target.checked }))} className="w-4 h-4 accent-amber-400" />
-                  <label htmlFor="needs_order" className="text-sm text-slate-300">Add to shopping list (need to order)</label>
+                <div className="col-span-2">
+                  <label className="block text-sm text-slate-300 mb-1">Order Status</label>
+                  <select className="input-field" value={partForm.order_status} onChange={(e) => setPartForm((p) => ({ ...p, order_status: e.target.value }))}>
+                    <option value="">— none —</option>
+                    <option value="needs_order">Need to Order</option>
+                    <option value="ordered">Ordered</option>
+                    <option value="received">Received</option>
+                  </select>
                 </div>
               </div>
               <div className="flex gap-3 pt-1">

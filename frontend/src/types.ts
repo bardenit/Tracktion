@@ -89,7 +89,7 @@ export interface VehiclePart {
   brand?: string;
   category: string;
   notes?: string;
-  needs_order: boolean;
+  order_status: 'needs_order' | 'ordered' | 'received' | null;
 }
 
 export interface InspectionItem {
