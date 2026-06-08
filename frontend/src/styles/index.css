@@ -59,7 +59,9 @@ body {
   }
 
   input[type="date"].input-field {
-    @apply h-10;
+    -webkit-appearance: none;
+    appearance: none;
+    @apply h-10 leading-6;
   }
 
   .card {
