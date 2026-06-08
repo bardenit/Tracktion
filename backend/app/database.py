@@ -30,29 +30,32 @@ def get_db():
 
 def run_migrations():
     from sqlalchemy import text
+    is_pg = not SQLALCHEMY_DATABASE_URL.startswith("sqlite")
+    ts_type = "TIMESTAMP" if is_pg else "DATETIME"
+    add_col = "ADD COLUMN IF NOT EXISTS" if is_pg else "ADD COLUMN"
     new_columns = [
-        "ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0",
-        "ALTER TABLE users ADD COLUMN last_failed_login_at DATETIME",
-        "ALTER TABLE users ADD COLUMN locked_until DATETIME",
-        "ALTER TABLE maintenance_reminders ADD COLUMN target_mileage FLOAT",
-        "ALTER TABLE maintenance_reminders ADD COLUMN reminder_miles INTEGER",
-        "ALTER TABLE vehicles ADD COLUMN license_plate VARCHAR(20)",
-        "ALTER TABLE expenses ADD COLUMN expires_on DATE",
-        "ALTER TABLE vehicle_parts ADD COLUMN needs_order BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE fuel_entries ADD COLUMN octane INTEGER",
-        "ALTER TABLE vehicles ADD COLUMN tank_size_gallons FLOAT",
+        f"ALTER TABLE users {add_col} failed_login_attempts INTEGER DEFAULT 0",
+        f"ALTER TABLE users {add_col} last_failed_login_at {ts_type}",
+        f"ALTER TABLE users {add_col} locked_until {ts_type}",
+        f"ALTER TABLE maintenance_reminders {add_col} target_mileage FLOAT",
+        f"ALTER TABLE maintenance_reminders {add_col} reminder_miles INTEGER",
+        f"ALTER TABLE vehicles {add_col} license_plate VARCHAR(20)",
+        f"ALTER TABLE expenses {add_col} expires_on DATE",
+        f"ALTER TABLE vehicle_parts {add_col} needs_order BOOLEAN DEFAULT FALSE",
+        f"ALTER TABLE fuel_entries {add_col} octane INTEGER",
+        f"ALTER TABLE vehicles {add_col} tank_size_gallons FLOAT",
 
-        """CREATE TABLE IF NOT EXISTS inspection_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        f"""CREATE TABLE IF NOT EXISTS inspection_items (
+            id {"SERIAL" if is_pg else "INTEGER"} PRIMARY KEY {"" if is_pg else "AUTOINCREMENT"},
             vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
             name VARCHAR(255) NOT NULL,
             category VARCHAR(100) NOT NULL DEFAULT 'general',
-            last_checked_at DATETIME,
+            last_checked_at {ts_type},
             order_index INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at {ts_type} DEFAULT CURRENT_TIMESTAMP
         )""",
-        """CREATE TABLE IF NOT EXISTS tire_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        f"""CREATE TABLE IF NOT EXISTS tire_events (
+            id {"SERIAL" if is_pg else "INTEGER"} PRIMARY KEY {"" if is_pg else "AUTOINCREMENT"},
             vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
             event_type VARCHAR(50) NOT NULL,
             date DATE NOT NULL,
@@ -68,7 +71,7 @@ def run_migrations():
             tread_rl FLOAT,
             tread_rr FLOAT,
             notes TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at {ts_type} DEFAULT CURRENT_TIMESTAMP
         )""",
     ]
     with engine.connect() as conn:
