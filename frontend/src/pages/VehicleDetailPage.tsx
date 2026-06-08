@@ -547,11 +547,20 @@ export default function VehicleDetailPage() {
   };
 
   useEffect(() => {
-    if (searchParams.get('action') === 'add' && searchParams.get('tab') === 'fuel' && !loading) {
+    if (searchParams.get('action') !== 'add' || loading) return;
+    const tab = searchParams.get('tab');
+    if (tab === 'fuel') {
       setEditFuel(null);
       setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
       setFormError('');
       setFuelModal(true);
+    } else if (tab === 'maintenance') {
+      setEditMaint(null);
+      setMaintForm({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
+      setMaintOther('');
+      setCustomTypesOpen(false);
+      setFormError('');
+      setMaintModal(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);

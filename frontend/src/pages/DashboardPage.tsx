@@ -249,7 +249,7 @@ export default function DashboardPage() {
                     className="bg-slate-700 hover:bg-slate-600 text-white text-xs py-1.5 px-3 rounded transition-colors">
                     Log Fuel
                   </button>
-                  <button onClick={() => navigate(`/vehicles/${vehicle.id}?tab=maintenance`)}
+                  <button onClick={() => navigate(`/vehicles/${vehicle.id}?tab=maintenance&action=add`)}
                     className="bg-slate-700 hover:bg-slate-600 text-white text-xs py-1.5 px-3 rounded transition-colors">
                     Log Service
                   </button>
