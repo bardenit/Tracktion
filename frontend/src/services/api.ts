@@ -218,6 +218,11 @@ class ApiClient {
     return response.data;
   }
 
+  async getVehicleReport(vehicleId: number): Promise<Blob> {
+    const response = await this.client.get(`/vehicles/${vehicleId}/report`, { responseType: 'blob' });
+    return response.data as Blob;
+  }
+
   async updateSpecsOverrides(vehicleId: number, overrides: Record<string, string>): Promise<Vehicle> {
     const response = await this.client.put(`/vehicles/${vehicleId}`, { specs_overrides: overrides });
     return response.data;

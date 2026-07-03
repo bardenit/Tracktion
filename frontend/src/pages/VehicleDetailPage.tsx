@@ -31,6 +31,28 @@ const DOC_TYPES = ['registration', 'insurance', 'receipt', 'service', 'warranty'
 
 const today = () => new Date().toISOString().split('T')[0];
 
+// iOS standalone PWAs can't window.open blob URLs or trigger downloads;
+// the share sheet is the only reliable way to save a file there.
+async function shareOrDownloadBlob(blob: Blob, filename: string) {
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 function downloadCSV(rows: Record<string, unknown>[], filename: string) {
   if (!rows.length) return;
   const keys = Object.keys(rows[0]);
@@ -478,6 +500,9 @@ export default function VehicleDetailPage() {
   const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '', order_status: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docType, setDocType] = useState('registration');
+  const [docViewer, setDocViewer] = useState<{ url: string; blob: Blob; mime: string; filename: string } | null>(null);
+  const [docOpening, setDocOpening] = useState<number | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
@@ -575,7 +600,10 @@ export default function VehicleDetailPage() {
     if (activeTab === 'trips') loadTrips().catch(console.error);
     if (activeTab === 'summary') loadPhotos().catch(console.error);
     if (activeTab === 'inspect') loadInspection().catch(console.error);
-    if (activeTab === 'tires') apiClient.listTireEvents(id).then(setTireEvents).catch(console.error);
+    if (activeTab === 'tires') {
+      apiClient.listTireEvents(id).then(setTireEvents).catch(console.error);
+      loadFuel().catch(console.error); // avgMilesPerDay for tread wear projection
+    }
     if (activeTab === 'analytics') {
       setAnalyticsLoading(true);
       const trailer = vehicle.vehicle_type === 'trailer';
@@ -1156,7 +1184,27 @@ export default function VehicleDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
           <div className="card space-y-3">
-            <h2 className="font-semibold text-white">Vehicle Info</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-white">Vehicle Info</h2>
+              <button
+                onClick={async () => {
+                  setReportLoading(true);
+                  try {
+                    const blob = await apiClient.getVehicleReport(id);
+                    const fname = `${vehicle.year}-${vehicle.make}-${vehicle.model}-report.pdf`.replace(/\s+/g, '-').toLowerCase();
+                    await shareOrDownloadBlob(blob, fname);
+                  } catch {
+                    addToast('error', 'Failed to generate report');
+                  } finally {
+                    setReportLoading(false);
+                  }
+                }}
+                disabled={reportLoading}
+                className="btn-secondary text-xs py-1 px-3"
+              >
+                {reportLoading ? 'Generating…' : 'PDF Report'}
+              </button>
+            </div>
             <VehicleTypeRow vehicle={vehicle} onUpdate={(v) => setVehicle(v)} />
             {(
               [
@@ -2260,14 +2308,19 @@ export default function VehicleDetailPage() {
                   <div className="flex items-center gap-3 ml-4 flex-shrink-0">
                     <button
                       onClick={async () => {
-                        const response = await apiClient.downloadDocument(id, doc.id);
-                        const url = URL.createObjectURL(response);
-                        window.open(url, '_blank');
-                        setTimeout(() => URL.revokeObjectURL(url), 10000);
+                        setDocOpening(doc.id);
+                        try {
+                          const blob = await apiClient.downloadDocument(id, doc.id);
+                          setDocViewer({ url: URL.createObjectURL(blob), blob, mime: blob.type, filename: doc.filename });
+                        } catch {
+                          addToast('error', 'Failed to load document');
+                        } finally {
+                          setDocOpening(null);
+                        }
                       }}
                       className="text-teal-400 hover:text-teal-300 text-sm transition-colors"
                     >
-                      Open
+                      {docOpening === doc.id ? 'Loading…' : 'Open'}
                     </button>
                     <button
                       onClick={() => deleteDocument(doc.id)}
@@ -2280,6 +2333,33 @@ export default function VehicleDetailPage() {
               ))}
             </div>
           )}
+
+          <Modal
+            isOpen={docViewer !== null}
+            onClose={() => {
+              if (docViewer) URL.revokeObjectURL(docViewer.url);
+              setDocViewer(null);
+            }}
+            title={docViewer?.filename ?? 'Document'}
+          >
+            {docViewer && (
+              <div className="space-y-4">
+                {docViewer.mime.startsWith('image/') ? (
+                  <img src={docViewer.url} alt={docViewer.filename} className="max-h-[60vh] w-full object-contain rounded-lg bg-slate-900" />
+                ) : docViewer.mime === 'application/pdf' ? (
+                  <iframe src={docViewer.url} title={docViewer.filename} className="w-full h-[60vh] rounded-lg bg-white" />
+                ) : (
+                  <p className="text-slate-400 text-sm">No preview available for this file type. Use Share / Save below.</p>
+                )}
+                <button
+                  onClick={() => shareOrDownloadBlob(docViewer.blob, docViewer.filename)}
+                  className="btn-primary w-full"
+                >
+                  Share / Save
+                </button>
+              </div>
+            )}
+          </Modal>
 
           <Modal isOpen={docModal} onClose={() => setDocModal(false)} title="Upload Document">
             <form onSubmit={saveDocument} className="space-y-4">
@@ -2545,6 +2625,34 @@ export default function VehicleDetailPage() {
         const currentSet = tireEvents.find((e) => e.event_type === 'install');
         const milesSinceInstall = currentSet && vehicle ? vehicle.current_mileage - currentSet.mileage : null;
         const EVENT_LABELS: Record<string, string> = { install: 'New Tires', rotation: 'Rotation', pressure: 'Pressure Check', tread: 'Tread Check' };
+
+        // Tread wear projection — readings on the current set only, oldest first
+        const treadReadings = tireEvents
+          .filter((e) => e.event_type === 'tread' && (!currentSet || e.date >= currentSet.date))
+          .sort((a, b) => a.mileage - b.mileage);
+        const CORNERS = [['FL', 'tread_fl'], ['FR', 'tread_fr'], ['RL', 'tread_rl'], ['RR', 'tread_rr']] as const;
+        const wear = CORNERS.map(([label, key]) => {
+          const pts = treadReadings
+            .filter((e) => e[key] != null)
+            .map((e) => ({ m: e.mileage, t: e[key] as number }));
+          const current = pts.length ? pts[pts.length - 1].t : null;
+          if (pts.length < 2) return { label, current, ratePer10k: null, milesTo2: null };
+          const first = pts[0];
+          const last = pts[pts.length - 1];
+          const span = last.m - first.m;
+          const worn = first.t - last.t;
+          if (span <= 0 || worn <= 0) return { label, current, ratePer10k: 0, milesTo2: null };
+          const rate = worn / span; // 32nds per mile
+          return { label, current, ratePer10k: rate * 10000, milesTo2: Math.max(0, (last.t - 2) / rate) };
+        });
+        const projected = wear.filter((w) => w.milesTo2 != null);
+        const minMilesTo2 = projected.length ? Math.min(...projected.map((w) => w.milesTo2!)) : null;
+        const mpd = avgMilesPerDay();
+        const replaceDate = minMilesTo2 != null && mpd ? new Date(Date.now() + (minMilesTo2 / mpd) * 86400000) : null;
+        const latestTreads = wear.map((w) => w.current).filter((t): t is number => t != null);
+        const unevenWear = latestTreads.length >= 2 && Math.max(...latestTreads) - Math.min(...latestTreads) >= 2;
+        const lowTread = latestTreads.some((t) => t <= 4);
+
         return (
           <div className="space-y-5">
             {/* Current tire set */}
@@ -2571,6 +2679,56 @@ export default function VehicleDetailPage() {
                 <p className="text-slate-500 text-sm">No tire install recorded yet. Add one to track miles on your current set.</p>
               )}
             </div>
+
+            {/* Tread wear projection */}
+            {treadReadings.length > 0 && (
+              <div className="card space-y-3">
+                <h2 className="font-semibold text-white">Tread Wear Projection</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {wear.map((w) => (
+                    <div key={w.label} className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-slate-400 text-xs">{w.label}</p>
+                      <p className={`font-medium mt-0.5 text-sm ${w.current != null && w.current <= 4 ? 'text-red-400' : 'text-white'}`}>
+                        {w.current != null ? `${w.current}/32"` : '—'}
+                      </p>
+                      <p className="text-slate-500 text-xs mt-1">
+                        {w.ratePer10k == null
+                          ? 'Need 2+ checks'
+                          : w.ratePer10k === 0
+                            ? 'No wear measured'
+                            : `${w.ratePer10k.toFixed(1)}/32 per 10k mi`}
+                      </p>
+                      {w.milesTo2 != null && (
+                        <p className="text-slate-400 text-xs mt-0.5">~{Math.round(w.milesTo2).toLocaleString()} mi to 2/32</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {minMilesTo2 != null && (
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+                    minMilesTo2 === 0 || lowTread
+                      ? 'bg-red-900/20 border border-red-700/40 text-red-300'
+                      : 'bg-slate-700/40 border border-slate-600/40 text-slate-300'
+                  }`}>
+                    <span>{minMilesTo2 === 0 || lowTread ? '⚠' : '◔'}</span>
+                    <span>
+                      {minMilesTo2 === 0
+                        ? 'At or below the 2/32" legal limit — replace now'
+                        : <>Estimated replacement in ~{Math.round(minMilesTo2).toLocaleString()} mi{replaceDate ? ` (${replaceDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})` : ''}{lowTread ? ' — a tire is at 4/32" or less' : ''}</>}
+                    </span>
+                  </div>
+                )}
+                {unevenWear && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-amber-900/20 border border-amber-700/40 text-amber-300">
+                    <span>!</span>
+                    <span>Uneven wear across corners (≥2/32" spread) — check alignment and rotation schedule</span>
+                  </div>
+                )}
+                {projected.length === 0 && (
+                  <p className="text-slate-500 text-xs">Log at least two tread checks at different mileages to project wear rate and replacement timing.</p>
+                )}
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="grid grid-cols-3 gap-2">

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, Vehicle, VehicleCollaborator, FuelEntry, MaintenanceEntry, Expense
+from app.models import User, Vehicle, VehicleCollaborator, FuelEntry, MaintenanceEntry, Expense, TireEvent
 from app.schemas import (
     VehicleCreate,
     VehicleUpdate,
@@ -17,6 +18,7 @@ from app.auth import get_current_user
 from app.deps import check_vehicle_access
 from app.services.vin_decoder import decode_vin, extract_vin_data_for_storage
 from app.services.recalls import get_recalls
+from app.services.report import build_vehicle_report
 
 router = APIRouter()
 
@@ -181,6 +183,27 @@ def vehicle_costs(
         "miles_tracked": miles_tracked,
         "cost_per_mile": total_cost / miles_tracked if miles_tracked > 0 else None,
     }
+
+
+@router.get("/{vehicle_id}/report")
+def vehicle_report(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    fuel_entries = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
+    maint_entries = db.query(MaintenanceEntry).filter(MaintenanceEntry.vehicle_id == vehicle_id).all()
+    expenses = db.query(Expense).filter(Expense.vehicle_id == vehicle_id).all()
+    tire_events = db.query(TireEvent).filter(TireEvent.vehicle_id == vehicle_id).all()
+
+    pdf = build_vehicle_report(vehicle, fuel_entries, maint_entries, expenses, tire_events)
+    filename = f"{vehicle.year}-{vehicle.make}-{vehicle.model}-report.pdf".replace(" ", "-").lower()
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{vehicle_id}/recalls")
