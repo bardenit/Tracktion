@@ -19,6 +19,7 @@ from app.deps import check_vehicle_access
 from app.services.vin_decoder import decode_vin, extract_vin_data_for_storage
 from app.services.recalls import get_recalls
 from app.services.report import build_vehicle_report
+from app.services.nhtsa import get_safety_ratings, get_complaints, get_epa_rating
 
 router = APIRouter()
 
@@ -219,6 +220,79 @@ async def vehicle_recalls(
     if recalls is None:
         return {"available": False, "count": 0, "recalls": []}
     return {"available": True, "count": len(recalls), "recalls": recalls}
+
+
+def _vehicle_specs(vehicle: Vehicle) -> dict:
+    specs = dict(vehicle.nhtsa_data or {})
+    specs.update(vehicle.specs_overrides or {})
+    return specs
+
+
+@router.get("/{vehicle_id}/safety-ratings")
+async def vehicle_safety_ratings(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    if not vehicle.make or not vehicle.model or not vehicle.year:
+        return {"available": False}
+    specs = _vehicle_specs(vehicle)
+    result = await get_safety_ratings(
+        vehicle.make, vehicle.model, vehicle.year,
+        drive_type=specs.get("drive_type"),
+        cab_type=specs.get("cab_type"),
+        fuel_type=specs.get("fuel_type") or vehicle.fuel_type,
+    )
+    if result is None:
+        return {"available": False}
+    return {"available": True, **result}
+
+
+@router.get("/{vehicle_id}/complaints")
+async def vehicle_complaints(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    if not vehicle.make or not vehicle.model or not vehicle.year:
+        return {"available": False}
+    specs = _vehicle_specs(vehicle)
+    result = await get_complaints(
+        vehicle.make, vehicle.model, vehicle.year,
+        cab_type=specs.get("cab_type"),
+        fuel_type=specs.get("fuel_type") or vehicle.fuel_type,
+    )
+    if result is None:
+        return {"available": False}
+    return {"available": True, **result}
+
+
+@router.get("/{vehicle_id}/epa")
+async def vehicle_epa(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    if not vehicle.make or not vehicle.model or not vehicle.year:
+        return {"available": False}
+    specs = _vehicle_specs(vehicle)
+    displacement = None
+    try:
+        displacement = float(specs.get("engine_displacement_l"))
+    except (TypeError, ValueError):
+        pass
+    result = await get_epa_rating(
+        vehicle.make, vehicle.model, vehicle.year,
+        drive_type=specs.get("drive_type"),
+        displacement=displacement,
+        fuel_type=specs.get("fuel_type") or vehicle.fuel_type,
+    )
+    if result is None:
+        return {"available": False}
+    return {"available": True, **result}
 
 
 @router.post("/{vehicle_id}/collaborators", response_model=VehicleCollaboratorResponse)

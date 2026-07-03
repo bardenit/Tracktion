@@ -133,6 +133,41 @@ export interface RecallsResponse {
   recalls: Recall[];
 }
 
+export interface SafetyRatings {
+  available: boolean;
+  vehicle_description?: string | null;
+  picture?: string | null;
+  overall?: string | null;
+  front_crash?: string | null;
+  side_crash?: string | null;
+  side_pole?: string | null;
+  rollover?: string | null;
+  complaints_count?: number;
+  recalls_count?: number;
+  investigation_count?: number;
+}
+
+export interface ComplaintsSummary {
+  available: boolean;
+  count?: number;
+  matched_model?: string | null;
+  top_components?: { component: string; count: number }[];
+  crash_count?: number;
+  fire_count?: number;
+  injury_count?: number;
+  recent?: { date?: string | null; component?: string; summary?: string }[];
+}
+
+export interface EpaRating {
+  available: boolean;
+  matched_model?: string;
+  matched_option?: string;
+  city?: number | null;
+  highway?: number | null;
+  combined?: number | null;
+  epa_fuel_type?: string;
+}
+
 export interface VehicleCosts {
   fuel_cost: number;
   maintenance_cost: number;

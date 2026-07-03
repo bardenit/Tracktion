@@ -7,10 +7,10 @@ import AnalyticsTab from '../components/AnalyticsTab';
 import type {
   Vehicle, FuelEntry, MaintenanceEntry, Reminder, TripEntry,
   Expense, VehicleDocument, VehiclePhoto, VehiclePart, InspectionItem, TireEvent,
-  RecallsResponse,
+  RecallsResponse, SafetyRatings, ComplaintsSummary, EpaRating,
 } from '../types';
 
-type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect' | 'tires';
+type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect' | 'tires' | 'nhtsa';
 
 const VEHICLE_SERVICE_TYPES = [
   'Oil Change', 'Tire Rotation', 'Brake Service', 'Air Filter',
@@ -394,6 +394,202 @@ function RecallsCard({ vehicleId }: { vehicleId: number }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function StarRow({ label, value }: { label: string; value?: string | null }) {
+  const n = Number(value);
+  const valid = Number.isFinite(n) && n >= 1 && n <= 5;
+  return (
+    <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+      <span className="text-slate-400">{label}</span>
+      {valid ? (
+        <span className="text-amber-400 tracking-wider">
+          {'★'.repeat(n)}<span className="text-slate-600">{'★'.repeat(5 - n)}</span>
+        </span>
+      ) : (
+        <span className="text-slate-500 text-xs">{value || 'Not Rated'}</span>
+      )}
+    </div>
+  );
+}
+
+function SafetyRatingsCard({ vehicleId }: { vehicleId: number }) {
+  const [data, setData] = useState<SafetyRatings | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getSafetyRatings(vehicleId)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [vehicleId]);
+
+  return (
+    <div className="card space-y-3">
+      <h2 className="font-semibold text-white">Crash Test Ratings</h2>
+      {loading ? (
+        <p className="text-slate-400 text-sm">Checking NHTSA...</p>
+      ) : !data?.available ? (
+        <p className="text-slate-400 text-sm">No NCAP ratings found for this vehicle.</p>
+      ) : (
+        <>
+          {data.picture && (
+            <img src={data.picture} alt={data.vehicle_description ?? 'Crash test vehicle'}
+              className="w-full rounded-lg bg-slate-900 object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          )}
+          <StarRow label="Overall" value={data.overall} />
+          <StarRow label="Frontal Crash" value={data.front_crash} />
+          <StarRow label="Side Crash" value={data.side_crash} />
+          <StarRow label="Side Pole" value={data.side_pole} />
+          <StarRow label="Rollover" value={data.rollover} />
+          {data.vehicle_description && (
+            <p className="text-slate-500 text-xs">Rated configuration: {data.vehicle_description}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function EpaCard({ vehicleId }: { vehicleId: number }) {
+  const [epa, setEpa] = useState<EpaRating | null>(null);
+  const [avgMpg, setAvgMpg] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiClient.getEpaRating(vehicleId).catch(() => null),
+      apiClient.getFuelStats(vehicleId).catch(() => null),
+    ]).then(([e, stats]) => {
+      if (cancelled) return;
+      setEpa(e);
+      setAvgMpg(stats?.average_mpg ?? null);
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [vehicleId]);
+
+  const combined = epa?.combined ?? null;
+  const diffPct = avgMpg != null && combined ? ((avgMpg - combined) / combined) * 100 : null;
+
+  return (
+    <div className="card space-y-3">
+      <h2 className="font-semibold text-white">EPA Fuel Economy</h2>
+      {loading ? (
+        <p className="text-slate-400 text-sm">Checking fueleconomy.gov...</p>
+      ) : !epa?.available ? (
+        <p className="text-slate-400 text-sm">No EPA rating match found for this vehicle.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              ['City', epa.city],
+              ['Combined', epa.combined],
+              ['Highway', epa.highway],
+            ].map(([label, value]) => (
+              <div key={label as string} className="bg-slate-700/50 rounded-lg p-3 text-center">
+                <p className="text-white font-bold text-lg">{value ?? '—'}</p>
+                <p className="text-slate-400 text-xs mt-0.5">{label as string} MPG</p>
+              </div>
+            ))}
+          </div>
+          {avgMpg != null && diffPct != null ? (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+              diffPct >= 0
+                ? 'bg-green-900/20 border border-green-700/40 text-green-300'
+                : diffPct >= -10
+                  ? 'bg-amber-900/20 border border-amber-700/40 text-amber-300'
+                  : 'bg-red-900/20 border border-red-700/40 text-red-300'
+            }`}>
+              <span>{diffPct >= 0 ? '▲' : '▼'}</span>
+              <span>
+                Your average: <strong>{avgMpg.toFixed(1)} MPG</strong> — {Math.abs(diffPct).toFixed(0)}% {diffPct >= 0 ? 'above' : 'below'} the EPA combined rating
+              </span>
+            </div>
+          ) : (
+            <p className="text-slate-500 text-xs">Log fuel entries to compare your real MPG against the sticker.</p>
+          )}
+          <p className="text-slate-500 text-xs">Matched: {epa.matched_model}{epa.matched_option ? ` — ${epa.matched_option}` : ''}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ComplaintsCard({ vehicleId }: { vehicleId: number }) {
+  const [data, setData] = useState<ComplaintsSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showRecent, setShowRecent] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getComplaints(vehicleId)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [vehicleId]);
+
+  const maxCount = data?.top_components?.[0]?.count ?? 0;
+
+  return (
+    <div className="card space-y-3 sm:col-span-2">
+      <h2 className="font-semibold text-white">Owner Complaints</h2>
+      {loading ? (
+        <p className="text-slate-400 text-sm">Checking NHTSA...</p>
+      ) : !data?.available ? (
+        <p className="text-slate-400 text-sm">Complaint lookup unavailable.</p>
+      ) : !data.count ? (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-green-900/20 border border-green-700/40 text-green-300">
+          <span>✓</span>
+          <span>No complaints on file with NHTSA</span>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="bg-slate-700/60 text-slate-200 px-2 py-1 rounded">{data.count} total</span>
+            {(data.crash_count ?? 0) > 0 && <span className="bg-red-900/30 text-red-300 border border-red-700/40 px-2 py-1 rounded">{data.crash_count} involved a crash</span>}
+            {(data.fire_count ?? 0) > 0 && <span className="bg-red-900/30 text-red-300 border border-red-700/40 px-2 py-1 rounded">{data.fire_count} involved fire</span>}
+            {(data.injury_count ?? 0) > 0 && <span className="bg-amber-900/30 text-amber-300 border border-amber-700/40 px-2 py-1 rounded">{data.injury_count} injuries</span>}
+          </div>
+          <div className="space-y-1.5">
+            {(data.top_components ?? []).map((c) => (
+              <div key={c.component} className="flex items-center gap-2 text-xs">
+                <span className="w-40 flex-shrink-0 text-slate-400 truncate capitalize">{c.component.toLowerCase()}</span>
+                <div className="flex-1 bg-slate-700/40 rounded h-4 overflow-hidden">
+                  <div className="h-full bg-teal-500/60 rounded" style={{ width: `${maxCount ? (c.count / maxCount) * 100 : 0}%` }} />
+                </div>
+                <span className="w-8 text-right text-slate-300">{c.count}</span>
+              </div>
+            ))}
+          </div>
+          {(data.recent ?? []).length > 0 && (
+            <div>
+              <button onClick={() => setShowRecent(!showRecent)} className="text-teal-400 hover:text-teal-300 text-xs transition-colors">
+                {showRecent ? 'Hide' : 'Show'} recent complaints {showRecent ? '▲' : '▼'}
+              </button>
+              {showRecent && (
+                <div className="mt-2 space-y-2">
+                  {data.recent!.map((r, i) => (
+                    <div key={i} className="bg-slate-800/60 rounded-lg p-3 text-xs">
+                      <p className="text-slate-400 mb-1">{r.date ?? ''}{r.component ? ` — ${r.component}` : ''}</p>
+                      <p className="text-slate-300">{r.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {data.matched_model && (
+            <p className="text-slate-500 text-xs">NHTSA model match: {data.matched_model}</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -1099,6 +1295,7 @@ export default function VehicleDetailPage() {
     { id: 'documents', label: 'Documents' },
     { id: 'inspect', label: 'Inspect' },
     { id: 'analytics', label: 'Analytics' },
+    ...(!isTrailer ? [{ id: 'nhtsa' as Tab, label: 'NHTSA' }] : []),
   ];
 
   const effectiveSpecs = { ...(vehicle.nhtsa_data || {}), ...(vehicle.specs_overrides || {}) };
@@ -1268,8 +1465,6 @@ export default function VehicleDetailPage() {
               </div>
             )}
           </div>
-
-          {!isTrailer && <RecallsCard vehicleId={id} />}
 
           {Object.keys(effectiveSpecs).length > 0 && (
             <div className="card sm:col-span-2">
@@ -2621,6 +2816,16 @@ export default function VehicleDetailPage() {
       </Modal>
 
       {/* ── TIRES ───────────────────────────────────────────────────────────────── */}
+      {/* ── NHTSA ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'nhtsa' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SafetyRatingsCard vehicleId={id} />
+          <EpaCard vehicleId={id} />
+          <RecallsCard vehicleId={id} />
+          <ComplaintsCard vehicleId={id} />
+        </div>
+      )}
+
       {activeTab === 'tires' && (() => {
         const currentSet = tireEvents.find((e) => e.event_type === 'install');
         const milesSinceInstall = currentSet && vehicle ? vehicle.current_mileage - currentSet.mileage : null;

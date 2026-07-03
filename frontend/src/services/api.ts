@@ -2,7 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import type {
   Vehicle, FuelEntry, MaintenanceEntry, TripEntry, Expense,
   VehiclePart, TireEvent, InspectionItem, VehicleDocument,
-  RecallsResponse, VehicleCosts,
+  RecallsResponse, VehicleCosts, SafetyRatings, ComplaintsSummary, EpaRating,
 } from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
@@ -215,6 +215,21 @@ class ApiClient {
 
   async getVehicleRecalls(vehicleId: number): Promise<RecallsResponse> {
     const response = await this.client.get(`/vehicles/${vehicleId}/recalls`);
+    return response.data;
+  }
+
+  async getSafetyRatings(vehicleId: number): Promise<SafetyRatings> {
+    const response = await this.client.get(`/vehicles/${vehicleId}/safety-ratings`);
+    return response.data;
+  }
+
+  async getComplaints(vehicleId: number): Promise<ComplaintsSummary> {
+    const response = await this.client.get(`/vehicles/${vehicleId}/complaints`);
+    return response.data;
+  }
+
+  async getEpaRating(vehicleId: number): Promise<EpaRating> {
+    const response = await this.client.get(`/vehicles/${vehicleId}/epa`);
     return response.data;
   }
 
