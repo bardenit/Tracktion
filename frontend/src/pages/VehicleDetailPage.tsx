@@ -7,6 +7,7 @@ import AnalyticsTab from '../components/AnalyticsTab';
 import type {
   Vehicle, FuelEntry, MaintenanceEntry, Reminder, TripEntry,
   Expense, VehicleDocument, VehiclePhoto, VehiclePart, InspectionItem, TireEvent,
+  RecallsResponse,
 } from '../types';
 
 type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect' | 'tires';
@@ -319,6 +320,62 @@ function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Veh
   );
 }
 
+
+function RecallsCard({ vehicleId }: { vehicleId: number }) {
+  const [recalls, setRecalls] = useState<RecallsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiClient.getVehicleRecalls(vehicleId)
+      .then((data) => { if (!cancelled) setRecalls(data); })
+      .catch(() => { if (!cancelled) setRecalls(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [vehicleId]);
+
+  return (
+    <div className="card space-y-3 sm:col-span-2">
+      <h2 className="font-semibold text-white">Safety Recalls</h2>
+      {loading ? (
+        <p className="text-slate-400 text-sm">Checking NHTSA...</p>
+      ) : !recalls || !recalls.available ? (
+        <p className="text-slate-400 text-sm">Recall lookup unavailable.</p>
+      ) : recalls.count === 0 ? (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-green-900/20 border border-green-700/40 text-green-300">
+          <span>✓</span>
+          <span>No open recalls from NHTSA</span>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {recalls.recalls.map((r, i) => (
+            <div key={r.campaign_number ?? i} className="rounded-lg bg-red-900/20 border border-red-700/40">
+              <button
+                onClick={() => setExpanded(expanded === i ? null : i)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-red-300"
+              >
+                <span className="flex-shrink-0">⚠</span>
+                <span className="flex-1">{r.component || 'Recall'}</span>
+                <span className="text-xs opacity-60">{r.campaign_number}</span>
+                <span className="opacity-60">{expanded === i ? '▲' : '▼'}</span>
+              </button>
+              {expanded === i && (
+                <div className="px-3 pb-3 space-y-2 text-xs text-slate-300">
+                  {r.summary && <p><span className="text-slate-400 font-semibold">Summary: </span>{r.summary}</p>}
+                  {r.consequence && <p><span className="text-slate-400 font-semibold">Risk: </span>{r.consequence}</p>}
+                  {r.remedy && <p><span className="text-slate-400 font-semibold">Remedy: </span>{r.remedy}</p>}
+                  {r.report_date && <p><span className="text-slate-400 font-semibold">Reported: </span>{r.report_date}</p>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function VehicleDetailPage() {
   const { vehicleId } = useParams<{ vehicleId: string }>();
@@ -1163,6 +1220,8 @@ export default function VehicleDetailPage() {
               </div>
             )}
           </div>
+
+          {!isTrailer && <RecallsCard vehicleId={id} />}
 
           {Object.keys(effectiveSpecs).length > 0 && (
             <div className="card sm:col-span-2">

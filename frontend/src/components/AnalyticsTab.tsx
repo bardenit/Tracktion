@@ -185,8 +185,28 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
     );
   }
 
+  // ── Total cost of ownership ───────────────────────────────────────────────────
+
+  const tcoMileages = [...fuelEntries, ...maintEntries].map((e) => e.mileage).filter((m) => m > 0);
+  const tcoMiles = tcoMileages.length >= 2 ? Math.max(...tcoMileages) - Math.min(...tcoMileages) : 0;
+  const tcoTotal = fuelTotal + maintTotal + expenses.reduce((s, e) => e.category !== 'fuel' ? s + Number(e.amount) : s, 0);
+  const tcoPerMile = tcoMiles > 0 ? tcoTotal / tcoMiles : null;
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="sm:col-span-2 grid grid-cols-3 gap-4">
+        {[
+          ['Total Spent', `$${tcoTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`],
+          ['Miles Tracked', tcoMiles > 0 ? tcoMiles.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'],
+          ['Cost per Mile', tcoPerMile != null ? `$${tcoPerMile.toFixed(2)}` : '—'],
+        ].map(([label, value]) => (
+          <div key={label} className="card text-center py-4">
+            <div className="text-lg font-bold text-white">{value}</div>
+            <div className="text-xs text-slate-400 mt-1">{label}</div>
+          </div>
+        ))}
+      </div>
+
       <ChartCard title="MPG Over Time" empty={mpgData.length < 2}>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={mpgData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>

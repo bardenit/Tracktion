@@ -166,7 +166,15 @@ def get_fuel_stats(
     entries = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
 
     if not entries:
-        return {"average_mpg": None, "total_spent": 0, "total_gallons": 0, "entries_count": 0}
+        return {"average_mpg": None, "total_spent": 0, "total_gallons": 0, "entries_count": 0, "miles_per_day": None}
+
+    miles_per_day = None
+    dated = sorted(entries, key=lambda e: e.date)
+    if len(dated) >= 2:
+        days = (dated[-1].date - dated[0].date).days
+        miles = dated[-1].mileage - dated[0].mileage
+        if days > 0 and miles > 0:
+            miles_per_day = miles / days
 
     mpg_values = [e.mpg for e in entries if e.mpg is not None]
     return {
@@ -174,4 +182,5 @@ def get_fuel_stats(
         "total_spent": sum(e.cost for e in entries),
         "total_gallons": sum(e.gallons for e in entries),
         "entries_count": len(entries),
+        "miles_per_day": miles_per_day,
     }

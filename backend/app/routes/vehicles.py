@@ -3,7 +3,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, Vehicle, VehicleCollaborator
+from app.models import User, Vehicle, VehicleCollaborator, FuelEntry, MaintenanceEntry, Expense
 from app.schemas import (
     VehicleCreate,
     VehicleUpdate,
@@ -16,6 +16,7 @@ from app.schemas import (
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
 from app.services.vin_decoder import decode_vin, extract_vin_data_for_storage
+from app.services.recalls import get_recalls
 
 router = APIRouter()
 
@@ -150,6 +151,51 @@ async def decode_vehicle_vin(
     if not result:
         raise HTTPException(status_code=400, detail="Invalid VIN or decode failed")
     return result
+
+
+@router.get("/{vehicle_id}/costs")
+def vehicle_costs(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    check_vehicle_access(vehicle_id, current_user.id, db)
+    fuel_entries = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
+    maint_entries = db.query(MaintenanceEntry).filter(MaintenanceEntry.vehicle_id == vehicle_id).all()
+    expenses = db.query(Expense).filter(Expense.vehicle_id == vehicle_id).all()
+
+    fuel_cost = sum(e.cost for e in fuel_entries)
+    maintenance_cost = sum(e.cost for e in maint_entries)
+    # Fuel-category expenses would double-count fuel entries
+    other_cost = sum(e.amount for e in expenses if e.category != "fuel")
+    total_cost = fuel_cost + maintenance_cost + other_cost
+
+    mileages = [e.mileage for e in fuel_entries + maint_entries if e.mileage and e.mileage > 0]
+    miles_tracked = max(mileages) - min(mileages) if len(mileages) >= 2 else 0
+
+    return {
+        "fuel_cost": fuel_cost,
+        "maintenance_cost": maintenance_cost,
+        "other_cost": other_cost,
+        "total_cost": total_cost,
+        "miles_tracked": miles_tracked,
+        "cost_per_mile": total_cost / miles_tracked if miles_tracked > 0 else None,
+    }
+
+
+@router.get("/{vehicle_id}/recalls")
+async def vehicle_recalls(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    if not vehicle.make or not vehicle.model or not vehicle.year:
+        return {"available": False, "count": 0, "recalls": []}
+    recalls = await get_recalls(vehicle.make, vehicle.model, vehicle.year)
+    if recalls is None:
+        return {"available": False, "count": 0, "recalls": []}
+    return {"available": True, "count": len(recalls), "recalls": recalls}
 
 
 @router.post("/{vehicle_id}/collaborators", response_model=VehicleCollaboratorResponse)

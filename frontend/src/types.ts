@@ -117,3 +117,27 @@ export interface TireEvent {
   tread_rr?: number;
   notes?: string;
 }
+
+export interface Recall {
+  campaign_number?: string;
+  component?: string;
+  summary?: string;
+  consequence?: string;
+  remedy?: string;
+  report_date?: string;
+}
+
+export interface RecallsResponse {
+  available: boolean;
+  count: number;
+  recalls: Recall[];
+}
+
+export interface VehicleCosts {
+  fuel_cost: number;
+  maintenance_cost: number;
+  other_cost: number;
+  total_cost: number;
+  miles_tracked: number;
+  cost_per_mile: number | null;
+}

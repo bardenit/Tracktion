@@ -2,12 +2,13 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import VehiclePhoto from '../components/VehiclePhoto';
-import type { Vehicle, Reminder, Expense } from '../types';
+import type { Vehicle, Reminder, Expense, VehicleCosts } from '../types';
 
 interface FuelStats {
   average_mpg: number | null;
   total_spent: number;
   entries_count: number;
+  miles_per_day: number | null;
 }
 
 interface Alert {
@@ -21,6 +22,7 @@ interface VehicleCardData {
   fuelStats: FuelStats | null;
   reminders: Reminder[];
   expenses: Expense[];
+  costs: VehicleCosts | null;
   loading: boolean;
 }
 
@@ -28,7 +30,7 @@ function vehicleLabel(v: Vehicle) {
   return v.nickname || `${v.year} ${v.make} ${v.model}`;
 }
 
-function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expense[]): Alert[] {
+function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expense[], milesPerDay: number | null = null): Alert[] {
   const alerts: Alert[] = [];
   for (const r of reminders) {
     if (r.is_overdue) {
@@ -36,15 +38,26 @@ function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expens
       continue;
     }
     let upcoming = false;
+    let projectedDays: number | null = null;
     if (r.next_due_mileage) {
       const left = r.next_due_mileage - vehicle.current_mileage;
       if (left >= 0 && left <= (r.reminder_miles ?? 500)) upcoming = true;
+      // Project mileage-based reminders into days using average daily miles
+      if (left > 0 && milesPerDay && milesPerDay > 0) {
+        const days = Math.round(left / milesPerDay);
+        if (days <= 14) { upcoming = true; projectedDays = days; }
+      }
     }
     if (r.next_due_date) {
       const days = Math.ceil((new Date(r.next_due_date + 'T00:00:00').getTime() - Date.now()) / 86400000);
       if (days >= 0 && days <= 14) upcoming = true;
     }
-    if (upcoming) alerts.push({ level: 'amber', text: `${r.service_type} due soon`, reminder: r, tab: 'maintenance' });
+    if (upcoming) {
+      const text = projectedDays !== null
+        ? `${r.service_type} due in ~${projectedDays}d`
+        : `${r.service_type} due soon`;
+      alerts.push({ level: 'amber', text, reminder: r, tab: 'maintenance' });
+    }
   }
   for (const e of expenses) {
     if (!e.expires_on) continue;
@@ -74,16 +87,17 @@ export default function DashboardPage() {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   const loadVehicleData = useCallback(async (vehicle: Vehicle) => {
-    setCardData((prev) => ({ ...prev, [vehicle.id]: { ...(prev[vehicle.id] ?? { fuelStats: null, reminders: [], expenses: [] }), loading: true } }));
+    setCardData((prev) => ({ ...prev, [vehicle.id]: { ...(prev[vehicle.id] ?? { fuelStats: null, reminders: [], expenses: [], costs: null }), loading: true } }));
     try {
-      const [reminders, expenses, fuelStats] = await Promise.all([
+      const [reminders, expenses, fuelStats, costs] = await Promise.all([
         apiClient.listMaintenanceReminders(vehicle.id),
         apiClient.listExpenses(vehicle.id),
         vehicle.vehicle_type !== 'trailer' ? apiClient.getFuelStats(vehicle.id) : Promise.resolve(null),
+        vehicle.vehicle_type !== 'trailer' ? apiClient.getVehicleCosts(vehicle.id).catch(() => null) : Promise.resolve(null),
       ]);
-      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats, reminders, expenses, loading: false } }));
+      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats, reminders, expenses, costs, loading: false } }));
     } catch {
-      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], loading: false } }));
+      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], costs: null, loading: false } }));
     }
   }, []);
 
@@ -150,7 +164,7 @@ export default function DashboardPage() {
     if (v.vehicle_type !== 'trailer') return true;
     const data = cardData[v.id];
     if (!data || data.loading) return false;
-    return computeAlerts(v, data.reminders, data.expenses).length > 0;
+    return computeAlerts(v, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null).length > 0;
   });
 
   return (
@@ -164,7 +178,7 @@ export default function DashboardPage() {
         {visibleVehicles.map((vehicle) => {
           const data = cardData[vehicle.id];
           const isTrailer = vehicle.vehicle_type === 'trailer';
-          const alerts = data && !data.loading ? computeAlerts(vehicle, data.reminders, data.expenses) : [];
+          const alerts = data && !data.loading ? computeAlerts(vehicle, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null) : [];
           const hasAlerts = alerts.length > 0;
 
           return (
@@ -198,6 +212,11 @@ export default function DashboardPage() {
                     {!isTrailer && data?.fuelStats && (
                       <span className="text-sm text-slate-400">
                         ${Number(data.fuelStats.total_spent).toFixed(0)} spent
+                      </span>
+                    )}
+                    {!isTrailer && data?.costs?.cost_per_mile != null && (
+                      <span className="text-sm text-slate-400">
+                        ${data.costs.cost_per_mile.toFixed(2)}/mi
                       </span>
                     )}
                   </div>
