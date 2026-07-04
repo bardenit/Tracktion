@@ -371,7 +371,8 @@ class ApiClient {
   }
 
   async ocrFuel(file: File) {
-    const resized = await resizeImageForUpload(file, 1024, 0.70, 'receipt.jpg');
+    // Keep pump digits legible — aggressive downscaling causes misread numbers
+    const resized = await resizeImageForUpload(file, 1600, 0.80, 'receipt.jpg');
     const formData = new FormData();
     formData.append('file', resized);
     const response = await this.client.post('/ocr/fuel', formData, {

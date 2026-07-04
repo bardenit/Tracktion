@@ -9,10 +9,17 @@ from app.data_config import get_config
 router = APIRouter()
 
 _FUEL_PROMPT = (
-    "Extract fuel purchase details from this receipt image. "
-    "Return a JSON object with these fields (only include ones you can find with confidence): "
+    "Extract fuel purchase details from this gas pump display or fuel receipt photo. "
+    "Pump displays use seven-segment digits that are easy to misread or transpose, so read each "
+    "number carefully digit by digit. Then cross-check your reading with arithmetic: "
+    "price per gallon x gallons must equal the total cost within a few cents. If the numbers "
+    "don't reconcile, re-read the digits and correct the value that makes the arithmetic consistent. "
+    "Sanity ranges: gallons 1-45, price per gallon $2-$7, total cost $5-$250. "
+    "Return a JSON object with these fields (only include ones you can read with high confidence "
+    "AND that pass the arithmetic check — omit a field rather than guessing): "
     "date (YYYY-MM-DD string), gallons (number), cost (total dollar amount as number), "
-    "location (gas station name string), mileage (odometer reading as number if visible). "
+    "price_per_gallon (number if shown), location (gas station name string), "
+    "mileage (odometer reading as number if visible). "
     "Return ONLY valid JSON with no markdown or explanation."
 )
 
@@ -37,7 +44,7 @@ def _get_client():
     return anthropic.Anthropic(api_key=key)
 
 
-async def _scan(file: UploadFile, prompt: str) -> dict:
+async def _scan(file: UploadFile, prompt: str, model: str = "claude-haiku-4-5-20251001") -> dict:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image (JPEG, PNG, WebP, etc.)")
 
@@ -50,7 +57,7 @@ async def _scan(file: UploadFile, prompt: str) -> dict:
 
     try:
         msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=model,
             max_tokens=512,
             messages=[{
                 "role": "user",
@@ -73,7 +80,8 @@ async def _scan(file: UploadFile, prompt: str) -> dict:
 
 @router.post("/fuel")
 async def ocr_fuel(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    return await _scan(file, _FUEL_PROMPT)
+    # Sonnet 5 has high-resolution vision — much better at seven-segment pump digits
+    return await _scan(file, _FUEL_PROMPT, model="claude-sonnet-5")
 
 
 @router.post("/expense")
