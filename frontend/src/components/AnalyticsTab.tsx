@@ -230,6 +230,71 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
   const priciest = byPrice[byPrice.length - 1];
   const stationSavings = cheapest && priciest ? priciest.avgPrice - cheapest.avgPrice : 0;
 
+  // ── Year in review ─────────────────────────────────────────────────────────────
+
+  const currentYear = new Date().getFullYear().toString();
+  const prevYear = (Number(currentYear) - 1).toString();
+
+  const yearStats = (year: string) => {
+    const yearFuel = fuelEntries.filter((e) => e.date.slice(0, 4) === year);
+    const yearMaint = maintEntries.filter((e) => e.date.slice(0, 4) === year);
+    const yearExpenses = expenses.filter((e) => e.date.slice(0, 4) === year);
+
+    const mileages = yearFuel.map((e) => e.mileage).filter((m) => m > 0);
+    const miles = mileages.length >= 2 ? Math.max(...mileages) - Math.min(...mileages) : 0;
+
+    const fuelCost = yearFuel.reduce((s, e) => s + Number(e.cost), 0);
+    const maintCost = yearMaint.reduce((s, e) => s + Number(e.cost), 0);
+    const otherCost = yearExpenses.reduce((s, e) => e.category !== 'fuel' ? s + Number(e.amount) : s, 0);
+    const totalSpend = fuelCost + maintCost + otherCost;
+
+    const gallons = yearFuel.reduce((s, e) => s + Number(e.gallons), 0);
+
+    const mpgs = yearFuel.filter((e) => e.mpg != null).map((e) => Number(e.mpg));
+    const avgMpg = mpgs.length > 0 ? mpgs.reduce((a, b) => a + b, 0) / mpgs.length : null;
+    const bestMpg = mpgs.length > 0 ? Math.max(...mpgs) : null;
+    const worstMpg = mpgs.length > 0 ? Math.min(...mpgs) : null;
+
+    const bigItems = [
+      ...yearMaint.map((e) => ({ amount: Number(e.cost), label: e.type })),
+      ...yearExpenses.map((e) => ({ amount: Number(e.amount), label: e.description })),
+    ];
+    const biggest = bigItems.length > 0 ? bigItems.reduce((a, b) => (b.amount > a.amount ? b : a)) : null;
+
+    return { fuelCount: yearFuel.length, miles, totalSpend, gallons, avgMpg, bestMpg, worstMpg, biggest };
+  };
+
+  const currentYearStats = yearStats(currentYear);
+  const prevYearStats = yearStats(prevYear);
+  const showYearInReview = currentYearStats.fuelCount >= 2;
+
+  const pctDelta = (curr: number, prev: number) => prev !== 0 ? ((curr - prev) / prev) * 100 : null;
+
+  const milesDelta = prevYearStats.miles > 0 ? pctDelta(currentYearStats.miles, prevYearStats.miles) : null;
+  const spendDelta = prevYearStats.totalSpend > 0 ? pctDelta(currentYearStats.totalSpend, prevYearStats.totalSpend) : null;
+  const mpgDelta = prevYearStats.avgMpg != null && currentYearStats.avgMpg != null
+    ? pctDelta(currentYearStats.avgMpg, prevYearStats.avgMpg)
+    : null;
+
+  const deltaLabel = (delta: number | null, year: string, higherIsGreen: boolean) => {
+    if (delta == null) return null;
+    const positive = delta >= 0;
+    const good = higherIsGreen ? positive : !positive;
+    return (
+      <div className={`text-xs ${good ? 'text-green-400' : 'text-red-400'}`}>
+        {positive ? '+' : ''}{delta.toFixed(0)}% vs {year}
+      </div>
+    );
+  };
+
+  const yearReviewLine = [
+    currentYearStats.bestMpg != null ? `Best MPG ${currentYearStats.bestMpg.toFixed(1)}` : null,
+    currentYearStats.worstMpg != null ? `Worst ${currentYearStats.worstMpg.toFixed(1)}` : null,
+    currentYearStats.biggest
+      ? `Biggest single cost: ${currentYearStats.biggest.label} ($${currentYearStats.biggest.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })})`
+      : null,
+  ].filter(Boolean).join(' · ');
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div className="sm:col-span-2 grid grid-cols-3 gap-4">
@@ -385,6 +450,36 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
             <p className="text-teal-300 text-xs mt-3">
               You save ~${stationSavings.toFixed(2)}/gal at {cheapest.name} vs {priciest.name}
             </p>
+          )}
+        </div>
+      )}
+
+      {showYearInReview && (
+        <div className="card sm:col-span-2">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">Year in Review — {currentYear}</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-700/50 rounded-lg p-3">
+              <div className="text-white font-bold">{currentYearStats.miles.toLocaleString()}</div>
+              <div className="text-slate-400 text-xs">Miles Driven</div>
+              {deltaLabel(milesDelta, prevYear, true)}
+            </div>
+            <div className="bg-slate-700/50 rounded-lg p-3">
+              <div className="text-white font-bold">${currentYearStats.totalSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+              <div className="text-slate-400 text-xs">Total Spent</div>
+              {deltaLabel(spendDelta, prevYear, false)}
+            </div>
+            <div className="bg-slate-700/50 rounded-lg p-3">
+              <div className="text-white font-bold">{currentYearStats.avgMpg != null ? currentYearStats.avgMpg.toFixed(1) : '—'}</div>
+              <div className="text-slate-400 text-xs">Avg MPG</div>
+              {deltaLabel(mpgDelta, prevYear, true)}
+            </div>
+            <div className="bg-slate-700/50 rounded-lg p-3">
+              <div className="text-white font-bold">{currentYearStats.gallons.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+              <div className="text-slate-400 text-xs">Gallons</div>
+            </div>
+          </div>
+          {yearReviewLine && (
+            <p className="text-slate-400 text-xs mt-3">{yearReviewLine}</p>
           )}
         </div>
       )}

@@ -265,6 +265,7 @@ class DocumentCreate(BaseModel):
 class DocumentResponse(BaseModel):
     id: int
     vehicle_id: int
+    maintenance_entry_id: Optional[int] = None
     filename: str
     document_type: str
     ocr_text: Optional[str]

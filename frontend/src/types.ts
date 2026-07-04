@@ -74,6 +74,7 @@ export interface VehicleDocument {
   document_type: string;
   filename: string;
   uploaded_at: string;
+  maintenance_entry_id?: number | null;
 }
 
 export interface VehiclePhoto {

@@ -134,6 +134,7 @@ class Document(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), index=True)
+    maintenance_entry_id = Column(Integer, ForeignKey("maintenance_entries.id"), nullable=True, index=True)
     filename = Column(String(255))
     storage_path = Column(String(512))  # Relative path in storage backend
     ocr_text = Column(Text, nullable=True)  # Extracted text (Phase 2)

@@ -10,6 +10,22 @@
   "theme_color": "#FF6A00",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Log Fuel",
+      "short_name": "Log Fuel",
+      "description": "Log a fill-up",
+      "url": "/?action=log-fuel",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Log Service",
+      "short_name": "Log Service",
+      "description": "Log a maintenance entry",
+      "url": "/?action=log-service",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",

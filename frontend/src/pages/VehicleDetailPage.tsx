@@ -697,6 +697,11 @@ export default function VehicleDetailPage() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docType, setDocType] = useState('registration');
   const [docViewer, setDocViewer] = useState<{ url: string; blob: Blob; mime: string; filename: string } | null>(null);
+  const [mpgAnomalyAck, setMpgAnomalyAck] = useState('');
+  const [attachEntry, setAttachEntry] = useState<MaintenanceEntry | null>(null);
+  const [attachDocs, setAttachDocs] = useState<VehicleDocument[]>([]);
+  const [attachUploading, setAttachUploading] = useState(false);
+  const [seedingReminders, setSeedingReminders] = useState(false);
   const [docOpening, setDocOpening] = useState<number | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
 
@@ -866,6 +871,23 @@ export default function VehicleDetailPage() {
       notes: fuelForm.notes || undefined,
       octane: fuelForm.octane ? Number(fuelForm.octane) : undefined,
     };
+    // Sanity-check the implied MPG against the vehicle's average — usually a
+    // typo'd odometer or gallons, occasionally something worth knowing about
+    if (!editFuel && fuelEntries.length >= 3 && payload.gallons > 0) {
+      const prev = fuelEntries[0];
+      const ackKey = `${payload.mileage}|${payload.gallons}`;
+      if (prev && payload.mileage > prev.mileage && mpgAnomalyAck !== ackKey) {
+        const entryMpg = (payload.mileage - prev.mileage) / payload.gallons;
+        const mpgs = fuelEntries.filter((f) => f.mpg != null).map((f) => Number(f.mpg));
+        const avg = mpgs.length ? mpgs.reduce((a, b) => a + b, 0) / mpgs.length : null;
+        if (avg && (entryMpg > avg * 1.3 || entryMpg < avg * 0.7)) {
+          setMpgAnomalyAck(ackKey);
+          setFormError(`This fill-up computes to ${entryMpg.toFixed(1)} MPG vs your ${avg.toFixed(1)} average — double-check the odometer and gallons. Tap Save again to keep it as entered.`);
+          setSaving(false);
+          return;
+        }
+      }
+    }
     try {
       if (editFuel) {
         await apiClient.updateFuelEntry(id, editFuel.id, payload);
@@ -1070,10 +1092,16 @@ export default function VehicleDetailPage() {
     setFormError('');
     try {
       await apiClient.uploadDocument(id, docFile, docType);
+      const uploadedFile = docFile;
+      const uploadedType = docType;
       setDocModal(false);
       setDocFile(null);
       loadDocuments().catch(console.error);
       addToast('success', 'Document uploaded');
+      // Registration/insurance images: try to auto-extract the expiration date
+      if ((uploadedType === 'registration' || uploadedType === 'insurance') && uploadedFile.type.startsWith('image/')) {
+        maybeCreateExpiryExpense(uploadedFile, uploadedType);
+      }
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Upload failed');
     } finally {
@@ -1206,6 +1234,101 @@ export default function VehicleDetailPage() {
     } catch {
       addToast('error', 'Failed to update reminder');
     }
+  };
+
+  const seedStandardReminders = async () => {
+    if (!vehicle) return;
+    setSeedingReminders(true);
+    const isDiesel = vehicle.fuel_type === 'diesel';
+    const presets: { service_type: string; interval_miles?: number; interval_days?: number }[] = isDiesel
+      ? [
+          { service_type: 'Oil Change', interval_miles: 7500, interval_days: 365 },
+          { service_type: 'Fuel Filter', interval_miles: 15000 },
+          { service_type: 'Tire Rotation', interval_miles: 7500 },
+          { service_type: 'Air Filter', interval_miles: 30000 },
+          { service_type: 'Coolant Flush', interval_miles: 60000 },
+          { service_type: 'Transmission Service', interval_miles: 60000 },
+        ]
+      : [
+          { service_type: 'Oil Change', interval_miles: 5000, interval_days: 180 },
+          { service_type: 'Tire Rotation', interval_miles: 7500 },
+          { service_type: 'Engine Air Filter', interval_miles: 30000 },
+          { service_type: 'Cabin Air Filter', interval_miles: 30000 },
+          { service_type: 'Coolant Flush', interval_miles: 60000 },
+          { service_type: 'Transmission Service', interval_miles: 60000 },
+          { service_type: 'Spark Plugs', interval_miles: 100000 },
+          { service_type: 'Brake Fluid', interval_days: 1095 },
+        ];
+    const existing = new Set(reminders.map((r) => r.service_type.toLowerCase()));
+    let added = 0;
+    try {
+      for (const p of presets) {
+        if (existing.has(p.service_type.toLowerCase())) continue;
+        const created = await apiClient.createMaintenanceReminder(id, {
+          service_type: p.service_type,
+          interval_miles: p.interval_miles,
+          interval_days: p.interval_days,
+          reminder_miles: 500,
+        });
+        // Arm the reminder from the current odometer / today
+        const update: Record<string, unknown> = {};
+        if (p.interval_miles) update.next_due_mileage = vehicle.current_mileage + p.interval_miles;
+        if (p.interval_days) {
+          const d = new Date();
+          d.setDate(d.getDate() + p.interval_days);
+          update.next_due_date = d.toISOString().split('T')[0];
+        }
+        if (Object.keys(update).length) await apiClient.updateMaintenanceReminder(id, created.id, update);
+        added++;
+      }
+      loadMaintenance().catch(console.error);
+      addToast('success', added ? `Added ${added} standard reminder${added > 1 ? 's' : ''}` : 'All standard reminders already exist');
+    } catch {
+      addToast('error', 'Failed to seed reminders');
+    } finally {
+      setSeedingReminders(false);
+    }
+  };
+
+  const openAttachments = async (entry: MaintenanceEntry) => {
+    setAttachEntry(entry);
+    setAttachDocs([]);
+    try {
+      const docs = await apiClient.listDocuments(id);
+      setAttachDocs(docs.filter((d) => d.maintenance_entry_id === entry.id));
+    } catch { /* list failure just shows empty */ }
+  };
+
+  const uploadAttachment = async (file: File) => {
+    if (!attachEntry) return;
+    setAttachUploading(true);
+    try {
+      await apiClient.uploadDocument(id, file, 'service', attachEntry.id);
+      const docs = await apiClient.listDocuments(id);
+      setAttachDocs(docs.filter((d) => d.maintenance_entry_id === attachEntry.id));
+      addToast('success', 'Attachment added');
+    } catch {
+      addToast('error', 'Failed to upload attachment');
+    } finally {
+      setAttachUploading(false);
+    }
+  };
+
+  const maybeCreateExpiryExpense = async (file: File, type: string) => {
+    try {
+      const res = await apiClient.ocrDocumentExpiry(file);
+      if (!res.expires_on) return;
+      const label = res.description || (type === 'registration' ? 'Vehicle registration' : 'Insurance policy');
+      if (!confirm(`Detected expiration ${res.expires_on} on this document.\n\nCreate an expiring expense ("${label}") so the dashboard warns you before it lapses?`)) return;
+      await apiClient.createExpense(id, {
+        date: today(),
+        category: type === 'registration' || type === 'insurance' ? type : 'other',
+        description: label,
+        amount: res.amount ?? 0,
+        expires_on: res.expires_on,
+      });
+      addToast('success', `Expiring expense created — dashboard will warn before ${res.expires_on}`);
+    } catch { /* OCR not configured or unreadable — skip quietly */ }
   };
 
   const handleGpsLocation = () => {
@@ -1878,7 +2001,13 @@ export default function VehicleDetailPage() {
                   </button>
                 </div>
                 <input className="input-field" placeholder="e.g. Meijer, Shell" value={fuelForm.location}
+                  list="station-suggestions"
                   onChange={(e) => setFuelForm((p) => ({ ...p, location: e.target.value }))} />
+                <datalist id="station-suggestions">
+                  {[...new Set(fuelEntries.map((f) => f.location?.trim()).filter(Boolean))].map((loc) => (
+                    <option key={loc} value={loc as string} />
+                  ))}
+                </datalist>
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Notes</label>
@@ -1919,18 +2048,27 @@ export default function VehicleDetailPage() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-white">Reminders</h2>
-              <button
-                onClick={() => {
-                  setReminderTrigger('interval');
-                  setReminderForm({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
-                  setCustomTypesOpen(false);
-                  setFormError('');
-                  setReminderModal(true);
-                }}
-                className="btn-secondary text-sm"
-              >
-                + Add Reminder
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={seedStandardReminders}
+                  disabled={seedingReminders}
+                  className="btn-secondary text-sm"
+                >
+                  {seedingReminders ? 'Seeding…' : 'Seed Standard Set'}
+                </button>
+                <button
+                  onClick={() => {
+                    setReminderTrigger('interval');
+                    setReminderForm({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
+                    setCustomTypesOpen(false);
+                    setFormError('');
+                    setReminderModal(true);
+                  }}
+                  className="btn-secondary text-sm"
+                >
+                  + Add Reminder
+                </button>
+              </div>
             </div>
             {reminders.length === 0 ? (
               <p className="text-slate-400 text-sm">No reminders set.</p>
@@ -2067,6 +2205,13 @@ export default function VehicleDetailPage() {
                         <td className="px-4 py-3 text-slate-400">{e.service_provider || '—'}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1">
+                            <button
+                              onClick={() => openAttachments(e)}
+                              title="Attachments"
+                              className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+                            >
+                              📎
+                            </button>
                             <button
                               onClick={() => openMaintEdit(e)}
                               className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
@@ -2544,33 +2689,6 @@ export default function VehicleDetailPage() {
               ))}
             </div>
           )}
-
-          <Modal
-            isOpen={docViewer !== null}
-            onClose={() => {
-              if (docViewer) URL.revokeObjectURL(docViewer.url);
-              setDocViewer(null);
-            }}
-            title={docViewer?.filename ?? 'Document'}
-          >
-            {docViewer && (
-              <div className="space-y-4">
-                {docViewer.mime.startsWith('image/') ? (
-                  <img src={docViewer.url} alt={docViewer.filename} className="max-h-[60vh] w-full object-contain rounded-lg bg-slate-900" />
-                ) : docViewer.mime === 'application/pdf' ? (
-                  <iframe src={docViewer.url} title={docViewer.filename} className="w-full h-[60vh] rounded-lg bg-white" />
-                ) : (
-                  <p className="text-slate-400 text-sm">No preview available for this file type. Use Share / Save below.</p>
-                )}
-                <button
-                  onClick={() => shareOrDownloadBlob(docViewer.blob, docViewer.filename)}
-                  className="btn-primary w-full"
-                >
-                  Share / Save
-                </button>
-              </div>
-            )}
-          </Modal>
 
           <Modal isOpen={docModal} onClose={() => setDocModal(false)} title="Upload Document">
             <form onSubmit={saveDocument} className="space-y-4">
@@ -3211,6 +3329,96 @@ export default function VehicleDetailPage() {
           tripEntries={analyticsTrips}
         />
       )}
+
+      {/* Document viewer — used by the Documents tab and maintenance attachments */}
+      <Modal
+        isOpen={docViewer !== null}
+        onClose={() => {
+          if (docViewer) URL.revokeObjectURL(docViewer.url);
+          setDocViewer(null);
+        }}
+        title={docViewer?.filename ?? 'Document'}
+      >
+        {docViewer && (
+          <div className="space-y-4">
+            {docViewer.mime.startsWith('image/') ? (
+              <img src={docViewer.url} alt={docViewer.filename} className="max-h-[60vh] w-full object-contain rounded-lg bg-slate-900" />
+            ) : docViewer.mime === 'application/pdf' ? (
+              <iframe src={docViewer.url} title={docViewer.filename} className="w-full h-[60vh] rounded-lg bg-white" />
+            ) : (
+              <p className="text-slate-400 text-sm">No preview available for this file type. Use Share / Save below.</p>
+            )}
+            <button
+              onClick={() => shareOrDownloadBlob(docViewer.blob, docViewer.filename)}
+              className="btn-primary w-full"
+            >
+              Share / Save
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* Maintenance attachments modal (opened from the service history table) */}
+      <Modal
+        isOpen={attachEntry !== null}
+        onClose={() => setAttachEntry(null)}
+        title={attachEntry ? `Attachments — ${attachEntry.type} (${fmtDate(attachEntry.date)})` : 'Attachments'}
+      >
+        {attachEntry && (
+          <div className="space-y-4">
+            {attachDocs.length === 0 ? (
+              <p className="text-slate-400 text-sm">No photos or receipts attached to this service record yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {attachDocs.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between bg-slate-800/60 rounded-lg px-3 py-2">
+                    <span className="text-white text-sm truncate">{d.filename}</span>
+                    <div className="flex gap-3 ml-3 flex-shrink-0">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const blob = await apiClient.downloadDocument(id, d.id);
+                            setDocViewer({ url: URL.createObjectURL(blob), blob, mime: blob.type, filename: d.filename });
+                          } catch {
+                            addToast('error', 'Failed to load attachment');
+                          }
+                        }}
+                        className="text-teal-400 hover:text-teal-300 text-sm transition-colors"
+                      >
+                        Open
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('Delete this attachment?')) return;
+                          await apiClient.deleteDocument(id, d.id).catch(console.error);
+                          setAttachDocs((prev) => prev.filter((x) => x.id !== d.id));
+                        }}
+                        className="text-red-400 hover:text-red-300 text-sm transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <label className={`btn-secondary text-sm cursor-pointer inline-block ${attachUploading ? 'opacity-50' : ''}`}>
+              {attachUploading ? 'Uploading…' : '+ Add Photo / Receipt'}
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                disabled={attachUploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadAttachment(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

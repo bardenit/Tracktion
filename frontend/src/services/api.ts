@@ -391,6 +391,16 @@ class ApiClient {
     return response.data;
   }
 
+  async ocrDocumentExpiry(file: File): Promise<{ expires_on?: string; description?: string; category?: string; amount?: number }> {
+    const resized = await resizeImageForUpload(file, 1500, 0.78, 'document.jpg');
+    const formData = new FormData();
+    formData.append('file', resized);
+    const response = await this.client.post('/ocr/document-expiry', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
   // Fuel endpoints
   async createFuelEntry(vehicleId: number, entryData: any) {
     const response = await this.client.post(`/fuel/${vehicleId}/entries`, entryData);
@@ -544,11 +554,12 @@ class ApiClient {
   }
 
   // Document endpoints
-  async uploadDocument(vehicleId: number, file: File, documentType: string) {
+  async uploadDocument(vehicleId: number, file: File, documentType: string, maintenanceEntryId?: number) {
     const resized = await resizeImageForUpload(file, 1500, 0.78, 'document.jpg');
     const formData = new FormData();
     formData.append('file', resized);
     formData.append('document_type', documentType);
+    if (maintenanceEntryId != null) formData.append('maintenance_entry_id', String(maintenanceEntryId));
 
     const response = await this.client.post(`/documents/${vehicleId}/documents`, formData, {
       headers: {

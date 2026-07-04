@@ -47,6 +47,7 @@ def run_migrations():
         f"ALTER TABLE vehicle_parts {add_col} order_status VARCHAR(20)",
         f"ALTER TABLE vehicles {add_col} recalls_seen {'JSON' if is_pg else 'TEXT'}",
         f"ALTER TABLE vehicles {add_col} recalls_cache {'JSON' if is_pg else 'TEXT'}",
+        f"ALTER TABLE documents {add_col} maintenance_entry_id INTEGER",
         # Migrate existing needs_order=true rows
         "UPDATE vehicle_parts SET order_status = 'needs_order' WHERE needs_order = true AND order_status IS NULL",
 

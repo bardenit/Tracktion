@@ -56,6 +56,7 @@ async def upload_document(
     vehicle_id: int,
     file: UploadFile = File(...),
     document_type: str = Form(...),
+    maintenance_entry_id: int | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -79,6 +80,7 @@ async def upload_document(
 
     doc = Document(
         vehicle_id=vehicle_id,
+        maintenance_entry_id=maintenance_entry_id,
         filename=safe_name,
         storage_path=relative_path,
         document_type=document_type,

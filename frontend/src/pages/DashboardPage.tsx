@@ -9,6 +9,7 @@ interface FuelStats {
   total_spent: number;
   entries_count: number;
   miles_per_day: number | null;
+  last_entry_date: string | null;
 }
 
 interface Alert {
@@ -37,8 +38,14 @@ function vehicleLabel(v: Vehicle) {
   return v.nickname || `${v.year} ${v.make} ${v.model}`;
 }
 
-function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expense[], milesPerDay: number | null = null, recallStatus: RecallStatus | null = null): Alert[] {
+function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expense[], milesPerDay: number | null = null, recallStatus: RecallStatus | null = null, fuelStats: FuelStats | null = null): Alert[] {
   const alerts: Alert[] = [];
+  if (fuelStats && fuelStats.entries_count > 0 && fuelStats.last_entry_date) {
+    const days = Math.floor((Date.now() - new Date(fuelStats.last_entry_date + 'T00:00:00').getTime()) / 86400000);
+    if (days > 30) {
+      alerts.push({ level: 'amber', text: `Odometer last updated ${days}d ago — log a fill-up`, reminder: null, tab: 'fuel' });
+    }
+  }
   if (recallStatus?.available && recallStatus.new_count > 0) {
     for (const r of recallStatus.new_recalls) {
       alerts.push({
@@ -129,6 +136,17 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [loadVehicleData]);
 
+  useEffect(() => {
+    if (vehicles.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get('action');
+    if (action !== 'log-fuel' && action !== 'log-service') return;
+    const target = vehicles.find((v) => v.vehicle_type !== 'trailer');
+    if (!target) return;
+    const tab = action === 'log-fuel' ? 'fuel' : 'maintenance';
+    navigate(`/vehicles/${target.id}?tab=${tab}&action=add`, { replace: true });
+  }, [vehicles, navigate]);
+
   const openMarkDone = (vehicle: Vehicle, reminder: Reminder) => {
     setMarkDoneVehicleId(vehicle.id);
     setMarkDoneVehicle(vehicle);
@@ -182,7 +200,7 @@ export default function DashboardPage() {
     if (v.vehicle_type !== 'trailer') return true;
     const data = cardData[v.id];
     if (!data || data.loading) return false;
-    return computeAlerts(v, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null, data.recallStatus).length > 0;
+    return computeAlerts(v, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null, data.recallStatus, data.fuelStats).length > 0;
   });
 
   return (
@@ -196,7 +214,7 @@ export default function DashboardPage() {
         {visibleVehicles.map((vehicle) => {
           const data = cardData[vehicle.id];
           const isTrailer = vehicle.vehicle_type === 'trailer';
-          const alerts = data && !data.loading ? computeAlerts(vehicle, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null, data.recallStatus) : [];
+          const alerts = data && !data.loading ? computeAlerts(vehicle, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null, data.recallStatus, data.fuelStats) : [];
           const hasAlerts = alerts.length > 0;
 
           return (

@@ -87,3 +87,20 @@ async def ocr_fuel(file: UploadFile = File(...), current_user: User = Depends(ge
 @router.post("/expense")
 async def ocr_expense(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     return await _scan(file, _EXPENSE_PROMPT)
+
+
+_DOC_EXPIRY_PROMPT = (
+    "This is a photo or scan of a vehicle document such as a registration card or insurance card. "
+    "Extract these fields (only include ones you can read with confidence): "
+    "expires_on (the expiration/renewal date as a YYYY-MM-DD string — look for labels like "
+    "'expires', 'expiration date', 'valid through', 'renewal date', 'policy period end'), "
+    "description (a short label like 'Vehicle registration' or the insurer name and policy number), "
+    "category (exactly one of: insurance, registration, other), "
+    "amount (the fee or premium dollar amount as a number, if shown). "
+    "Return ONLY valid JSON with no markdown or explanation."
+)
+
+
+@router.post("/document-expiry")
+async def ocr_document_expiry(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    return await _scan(file, _DOC_EXPIRY_PROMPT)
