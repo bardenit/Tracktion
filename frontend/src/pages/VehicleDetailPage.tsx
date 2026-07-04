@@ -857,16 +857,16 @@ export default function VehicleDetailPage() {
     e.preventDefault();
     setSaving(true);
     setFormError('');
+    const payload = {
+      date: fuelForm.date,
+      mileage: Number(fuelForm.mileage),
+      gallons: Number(fuelForm.gallons),
+      cost: Number(fuelForm.cost),
+      location: fuelForm.location || undefined,
+      notes: fuelForm.notes || undefined,
+      octane: fuelForm.octane ? Number(fuelForm.octane) : undefined,
+    };
     try {
-      const payload = {
-        date: fuelForm.date,
-        mileage: Number(fuelForm.mileage),
-        gallons: Number(fuelForm.gallons),
-        cost: Number(fuelForm.cost),
-        location: fuelForm.location || undefined,
-        notes: fuelForm.notes || undefined,
-        octane: fuelForm.octane ? Number(fuelForm.octane) : undefined,
-      };
       if (editFuel) {
         await apiClient.updateFuelEntry(id, editFuel.id, payload);
       } else {
@@ -876,7 +876,14 @@ export default function VehicleDetailPage() {
       loadFuel().catch(console.error);
       addToast('success', editFuel ? 'Fuel entry updated' : 'Fill-up logged');
     } catch (err: any) {
-      setFormError(err.response?.data?.detail || 'Failed to save');
+      if (!editFuel && !err.response) {
+        // No connectivity (e.g. at the pump) — queue locally and sync later
+        apiClient.queueFuelEntry(id, payload);
+        setFuelModal(false);
+        addToast('info', 'Offline — fill-up saved on this device and will sync when you\'re back online');
+      } else {
+        setFormError(err.response?.data?.detail || 'Failed to save');
+      }
     } finally {
       setSaving(false);
     }
@@ -1669,6 +1676,15 @@ export default function VehicleDetailPage() {
       {/* ── FUEL ────────────────────────────────────────────────────────────── */}
       {activeTab === 'fuel' && (
         <div className="space-y-5">
+          {(() => {
+            const pending = apiClient.getOfflineFuelQueue().filter((q) => q.vehicleId === id).length;
+            return pending > 0 ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-amber-900/20 border border-amber-700/40 text-amber-300">
+                <span>◔</span>
+                <span>{pending} fill-up{pending > 1 ? 's' : ''} logged offline — will sync when you're back online</span>
+              </div>
+            ) : null;
+          })()}
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Fuel History</h2>
             <div className="flex gap-2">

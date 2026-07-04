@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy import or_
@@ -219,7 +221,51 @@ async def vehicle_recalls(
     recalls = await get_recalls(vehicle.make, vehicle.model, vehicle.year)
     if recalls is None:
         return {"available": False, "count": 0, "recalls": []}
+
+    # Viewing the full list acknowledges all current campaigns
+    campaigns = [{"campaign_number": r["campaign_number"], "component": r["component"]} for r in recalls]
+    vehicle.recalls_cache = {"campaigns": campaigns, "checked_at": datetime.utcnow().isoformat()}
+    vehicle.recalls_seen = [c["campaign_number"] for c in campaigns]
+    db.commit()
+
     return {"available": True, "count": len(recalls), "recalls": recalls}
+
+
+@router.get("/{vehicle_id}/recall-status")
+async def vehicle_recall_status(
+    vehicle_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight new-recall check for the dashboard; hits NHTSA at most once per day."""
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db)
+    if not vehicle.make or not vehicle.model or not vehicle.year:
+        return {"available": False, "new_count": 0, "new_recalls": []}
+
+    cache = vehicle.recalls_cache or {}
+    stale = True
+    checked_at = cache.get("checked_at")
+    if checked_at:
+        try:
+            stale = datetime.utcnow() - datetime.fromisoformat(checked_at) > timedelta(hours=24)
+        except ValueError:
+            pass
+
+    if stale:
+        recalls = await get_recalls(vehicle.make, vehicle.model, vehicle.year)
+        if recalls is not None:
+            cache = {
+                "campaigns": [{"campaign_number": r["campaign_number"], "component": r["component"]} for r in recalls],
+                "checked_at": datetime.utcnow().isoformat(),
+            }
+            vehicle.recalls_cache = cache
+            db.commit()
+        elif not cache:
+            return {"available": False, "new_count": 0, "new_recalls": []}
+
+    seen = set(vehicle.recalls_seen or [])
+    new = [c for c in cache.get("campaigns", []) if c.get("campaign_number") not in seen]
+    return {"available": True, "new_count": len(new), "new_recalls": new}
 
 
 def _vehicle_specs(vehicle: Vehicle) -> dict:

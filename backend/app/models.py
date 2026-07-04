@@ -48,6 +48,8 @@ class Vehicle(Base):
     tank_size_gallons = Column(Float, nullable=True)
     nhtsa_data = Column(JSON, nullable=True)
     specs_overrides = Column(JSON, nullable=True)
+    recalls_seen = Column(JSON, nullable=True)   # campaign numbers the user has viewed
+    recalls_cache = Column(JSON, nullable=True)  # {"campaigns": [{campaign_number, component}], "checked_at": iso}
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

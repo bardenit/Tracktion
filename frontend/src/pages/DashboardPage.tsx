@@ -18,11 +18,18 @@ interface Alert {
   tab: string;
 }
 
+interface RecallStatus {
+  available: boolean;
+  new_count: number;
+  new_recalls: { campaign_number?: string; component?: string }[];
+}
+
 interface VehicleCardData {
   fuelStats: FuelStats | null;
   reminders: Reminder[];
   expenses: Expense[];
   costs: VehicleCosts | null;
+  recallStatus: RecallStatus | null;
   loading: boolean;
 }
 
@@ -30,8 +37,18 @@ function vehicleLabel(v: Vehicle) {
   return v.nickname || `${v.year} ${v.make} ${v.model}`;
 }
 
-function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expense[], milesPerDay: number | null = null): Alert[] {
+function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expense[], milesPerDay: number | null = null, recallStatus: RecallStatus | null = null): Alert[] {
   const alerts: Alert[] = [];
+  if (recallStatus?.available && recallStatus.new_count > 0) {
+    for (const r of recallStatus.new_recalls) {
+      alerts.push({
+        level: 'red',
+        text: `New safety recall: ${r.component || 'see NHTSA tab'}`,
+        reminder: null,
+        tab: 'nhtsa',
+      });
+    }
+  }
   for (const r of reminders) {
     if (r.is_overdue) {
       alerts.push({ level: 'red', text: `${r.service_type} overdue`, reminder: r, tab: 'maintenance' });
@@ -87,17 +104,18 @@ export default function DashboardPage() {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   const loadVehicleData = useCallback(async (vehicle: Vehicle) => {
-    setCardData((prev) => ({ ...prev, [vehicle.id]: { ...(prev[vehicle.id] ?? { fuelStats: null, reminders: [], expenses: [], costs: null }), loading: true } }));
+    setCardData((prev) => ({ ...prev, [vehicle.id]: { ...(prev[vehicle.id] ?? { fuelStats: null, reminders: [], expenses: [], costs: null, recallStatus: null }), loading: true } }));
     try {
-      const [reminders, expenses, fuelStats, costs] = await Promise.all([
+      const [reminders, expenses, fuelStats, costs, recallStatus] = await Promise.all([
         apiClient.listMaintenanceReminders(vehicle.id),
         apiClient.listExpenses(vehicle.id),
         vehicle.vehicle_type !== 'trailer' ? apiClient.getFuelStats(vehicle.id) : Promise.resolve(null),
         vehicle.vehicle_type !== 'trailer' ? apiClient.getVehicleCosts(vehicle.id).catch(() => null) : Promise.resolve(null),
+        vehicle.vehicle_type !== 'trailer' ? apiClient.getRecallStatus(vehicle.id).catch(() => null) : Promise.resolve(null),
       ]);
-      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats, reminders, expenses, costs, loading: false } }));
+      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats, reminders, expenses, costs, recallStatus, loading: false } }));
     } catch {
-      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], costs: null, loading: false } }));
+      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], costs: null, recallStatus: null, loading: false } }));
     }
   }, []);
 
@@ -164,7 +182,7 @@ export default function DashboardPage() {
     if (v.vehicle_type !== 'trailer') return true;
     const data = cardData[v.id];
     if (!data || data.loading) return false;
-    return computeAlerts(v, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null).length > 0;
+    return computeAlerts(v, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null, data.recallStatus).length > 0;
   });
 
   return (
@@ -178,7 +196,7 @@ export default function DashboardPage() {
         {visibleVehicles.map((vehicle) => {
           const data = cardData[vehicle.id];
           const isTrailer = vehicle.vehicle_type === 'trailer';
-          const alerts = data && !data.loading ? computeAlerts(vehicle, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null) : [];
+          const alerts = data && !data.loading ? computeAlerts(vehicle, data.reminders, data.expenses, data.fuelStats?.miles_per_day ?? null, data.recallStatus) : [];
           const hasAlerts = alerts.length > 0;
 
           return (
@@ -282,6 +300,63 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {(() => {
+        const comparisonVehicles = vehicles.filter(
+          (v) => v.vehicle_type !== 'trailer' && cardData[v.id]?.costs != null
+        );
+        if (comparisonVehicles.length < 2) return null;
+
+        const costPerMileValues = comparisonVehicles
+          .map((v) => cardData[v.id]!.costs!.cost_per_mile)
+          .filter((c): c is number => c != null);
+        const minCostPerMile = costPerMileValues.length >= 2 ? Math.min(...costPerMileValues) : null;
+        const maxCostPerMile = costPerMileValues.length >= 2 ? Math.max(...costPerMileValues) : null;
+
+        return (
+          <div className="card">
+            <h2 className="font-semibold text-white mb-3">Fleet Comparison</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-400 text-left font-medium">
+                    <th className="px-3 py-2">Vehicle</th>
+                    <th className="px-3 py-2">MPG</th>
+                    <th className="px-3 py-2">$/mi</th>
+                    <th className="px-3 py-2">Total Spent</th>
+                    <th className="px-3 py-2">Miles Tracked</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparisonVehicles.map((vehicle) => {
+                    const data = cardData[vehicle.id]!;
+                    const costs = data.costs!;
+                    const costPerMile = costs.cost_per_mile;
+                    let costPerMileClass = 'text-slate-300';
+                    if (costPerMile != null && minCostPerMile != null && maxCostPerMile != null && minCostPerMile !== maxCostPerMile) {
+                      if (costPerMile === minCostPerMile) costPerMileClass = 'text-green-400';
+                      else if (costPerMile === maxCostPerMile) costPerMileClass = 'text-red-400';
+                    }
+                    return (
+                      <tr key={vehicle.id} className="border-t border-slate-700">
+                        <td className="px-3 py-2 text-white truncate">{vehicleLabel(vehicle)}</td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {data.fuelStats?.average_mpg != null ? Number(data.fuelStats.average_mpg).toFixed(1) : '—'}
+                        </td>
+                        <td className={`px-3 py-2 ${costPerMileClass}`}>
+                          {costPerMile != null ? `$${costPerMile.toFixed(2)}` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300">${costs.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                        <td className="px-3 py-2 text-slate-300">{costs.miles_tracked.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Mark Done dialog */}
       <dialog

@@ -6,6 +6,7 @@ import type {
 } from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
+const OFFLINE_FUEL_KEY = 'tracktion-offline-fuel';
 
 function resizeImageForUpload(
   file: File,
@@ -233,6 +234,11 @@ class ApiClient {
     return response.data;
   }
 
+  async getRecallStatus(vehicleId: number): Promise<{ available: boolean; new_count: number; new_recalls: { campaign_number?: string; component?: string }[] }> {
+    const response = await this.client.get(`/vehicles/${vehicleId}/recall-status`);
+    return response.data;
+  }
+
   async getVehicleReport(vehicleId: number): Promise<Blob> {
     const response = await this.client.get(`/vehicles/${vehicleId}/report`, { responseType: 'blob' });
     return response.data as Blob;
@@ -388,6 +394,50 @@ class ApiClient {
   async createFuelEntry(vehicleId: number, entryData: any) {
     const response = await this.client.post(`/fuel/${vehicleId}/entries`, entryData);
     return response.data;
+  }
+
+  // ── Offline fuel queue ──────────────────────────────────────────────────
+  // Fill-ups logged with no signal are stored locally and synced when back online.
+
+  getOfflineFuelQueue(): { vehicleId: number; payload: any; queuedAt: string }[] {
+    try {
+      return JSON.parse(localStorage.getItem(OFFLINE_FUEL_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  queueFuelEntry(vehicleId: number, payload: any) {
+    const queue = this.getOfflineFuelQueue();
+    queue.push({ vehicleId, payload, queuedAt: new Date().toISOString() });
+    localStorage.setItem(OFFLINE_FUEL_KEY, JSON.stringify(queue));
+  }
+
+  async syncOfflineFuelEntries(): Promise<{ synced: number; rejected: number; remaining: number }> {
+    const queue = this.getOfflineFuelQueue();
+    if (queue.length === 0) return { synced: 0, rejected: 0, remaining: 0 };
+
+    // Oldest fill-up first so server-side mileage validation sees them in order
+    queue.sort((a, b) =>
+      (a.payload.date || '').localeCompare(b.payload.date || '') || a.queuedAt.localeCompare(b.queuedAt));
+
+    let synced = 0;
+    let rejected = 0;
+    const remaining: typeof queue = [];
+    for (const item of queue) {
+      try {
+        await this.createFuelEntry(item.vehicleId, item.payload);
+        synced++;
+      } catch (err: any) {
+        if (err?.response) {
+          rejected++; // server rejected it (e.g. mileage conflict) — retrying won't help
+        } else {
+          remaining.push(item); // still offline, keep for next attempt
+        }
+      }
+    }
+    localStorage.setItem(OFFLINE_FUEL_KEY, JSON.stringify(remaining));
+    return { synced, rejected, remaining: remaining.length };
   }
 
   async listFuelEntries(vehicleId: number): Promise<FuelEntry[]> {

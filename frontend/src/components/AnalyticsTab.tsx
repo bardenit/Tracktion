@@ -192,6 +192,44 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
   const tcoTotal = fuelTotal + maintTotal + expenses.reduce((s, e) => e.category !== 'fuel' ? s + Number(e.amount) : s, 0);
   const tcoPerMile = tcoMiles > 0 ? tcoTotal / tcoMiles : null;
 
+  // ── Fuel station insights ─────────────────────────────────────────────────────
+
+  const locatedEntries = fuelEntries.filter((e) => e.location && e.location.trim() !== '');
+
+  const stationMap: Record<string, { name: string; fills: number; cost: number; gallons: number; mpgs: number[] }> = {};
+  for (const e of locatedEntries) {
+    const key = e.location!.trim().toLowerCase();
+    if (!stationMap[key]) {
+      stationMap[key] = { name: e.location!.trim(), fills: 0, cost: 0, gallons: 0, mpgs: [] };
+    }
+    stationMap[key].fills += 1;
+    stationMap[key].cost += Number(e.cost);
+    stationMap[key].gallons += Number(e.gallons);
+    if (e.mpg != null) stationMap[key].mpgs.push(Number(e.mpg));
+  }
+
+  const overallGallons = locatedEntries.reduce((s, e) => s + Number(e.gallons), 0);
+  const overallAvgPrice = overallGallons > 0
+    ? locatedEntries.reduce((s, e) => s + Number(e.cost), 0) / overallGallons
+    : 0;
+
+  const stationRows = Object.values(stationMap)
+    .map((s) => ({
+      name: s.name,
+      fills: s.fills,
+      avgPrice: s.gallons > 0 ? s.cost / s.gallons : 0,
+      avgMpg: s.mpgs.length > 0 ? s.mpgs.reduce((a, b) => a + b, 0) / s.mpgs.length : null,
+    }))
+    .sort((a, b) => b.fills - a.fills)
+    .slice(0, 8);
+
+  const showStationInsights = locatedEntries.length >= 3 && Object.keys(stationMap).length >= 2;
+
+  const byPrice = [...stationRows].sort((a, b) => a.avgPrice - b.avgPrice);
+  const cheapest = byPrice[0];
+  const priciest = byPrice[byPrice.length - 1];
+  const stationSavings = cheapest && priciest ? priciest.avgPrice - cheapest.avgPrice : 0;
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div className="sm:col-span-2 grid grid-cols-3 gap-4">
@@ -305,6 +343,50 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
+      )}
+
+      {showStationInsights && (
+        <div className="card sm:col-span-2">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">Fuel Station Insights</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-slate-400 text-left">
+                  <th className="font-medium pb-2 pr-4">Station</th>
+                  <th className="font-medium pb-2 pr-4">Fills</th>
+                  <th className="font-medium pb-2 pr-4">Avg $/gal</th>
+                  <th className="font-medium pb-2 pr-4">vs Fleet Avg</th>
+                  <th className="font-medium pb-2">Avg MPG</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stationRows.map((s) => {
+                  const delta = s.avgPrice - overallAvgPrice;
+                  const deltaClass = delta <= -0.01 ? 'text-green-400' : delta >= 0.01 ? 'text-red-400' : 'text-slate-300';
+                  const deltaText = delta <= -0.01
+                    ? `−$${Math.abs(delta).toFixed(2)}`
+                    : delta >= 0.01
+                      ? `+$${delta.toFixed(2)}`
+                      : '$0.00';
+                  return (
+                    <tr key={s.name} className="border-t border-slate-700">
+                      <td className="py-2 pr-4 text-white">{s.name}</td>
+                      <td className="py-2 pr-4 text-slate-300">{s.fills}</td>
+                      <td className="py-2 pr-4 text-slate-300">${s.avgPrice.toFixed(2)}</td>
+                      <td className={`py-2 pr-4 ${deltaClass}`}>{deltaText}</td>
+                      <td className="py-2 text-slate-300">{s.avgMpg != null ? s.avgMpg.toFixed(1) : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {cheapest && priciest && cheapest.name !== priciest.name && stationSavings >= 0.10 && (
+            <p className="text-teal-300 text-xs mt-3">
+              You save ~${stationSavings.toFixed(2)}/gal at {cheapest.name} vs {priciest.name}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
