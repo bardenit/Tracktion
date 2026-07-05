@@ -703,6 +703,8 @@ export default function VehicleDetailPage() {
   const [attachUploading, setAttachUploading] = useState(false);
   const [seedingReminders, setSeedingReminders] = useState(false);
   const [seedModal, setSeedModal] = useState(false);
+  const [editReminder, setEditReminder] = useState<Reminder | null>(null);
+  const [editRemForm, setEditRemForm] = useState({ interval_miles: '', interval_days: '', last_mileage: '', last_date: '', reminder_miles: '', target_mileage: '' });
   const [seedRows, setSeedRows] = useState<{ service_type: string; unit: 'miles' | 'days'; interval: string; last: string; include: boolean; exists: boolean }[]>([]);
   const [docOpening, setDocOpening] = useState<number | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -1235,6 +1237,55 @@ export default function VehicleDetailPage() {
       addToast('success', `${r.service_type} interval started from today`);
     } catch {
       addToast('error', 'Failed to update reminder');
+    }
+  };
+
+  const openReminderEdit = (r: Reminder) => {
+    setEditRemForm({
+      interval_miles: r.interval_miles != null ? String(r.interval_miles) : '',
+      interval_days: r.interval_days != null ? String(r.interval_days) : '',
+      last_mileage: r.last_performed_mileage != null ? String(Math.round(r.last_performed_mileage)) : '',
+      last_date: r.last_performed_date || '',
+      reminder_miles: r.reminder_miles != null ? String(r.reminder_miles) : '',
+      target_mileage: r.target_mileage != null ? String(r.target_mileage) : '',
+    });
+    setFormError('');
+    setEditReminder(r);
+  };
+
+  const saveReminderEdit = async () => {
+    if (!editReminder) return;
+    setSaving(true);
+    const num = (v: string) => (v !== '' ? Number(v) : null);
+    const f = editRemForm;
+    const payload: Record<string, unknown> = {
+      interval_miles: num(f.interval_miles),
+      interval_days: num(f.interval_days),
+      reminder_miles: num(f.reminder_miles),
+      target_mileage: num(f.target_mileage),
+      last_performed_mileage: num(f.last_mileage),
+      last_performed_date: f.last_date || null,
+    };
+    // Recompute due points from the edited starting values
+    if (f.last_mileage !== '' && f.interval_miles !== '') {
+      payload.next_due_mileage = Number(f.last_mileage) + Number(f.interval_miles);
+    } else if (f.target_mileage !== '') {
+      payload.next_due_mileage = Number(f.target_mileage);
+    }
+    if (f.last_date && f.interval_days !== '') {
+      const d = new Date(f.last_date + 'T00:00:00');
+      d.setDate(d.getDate() + Number(f.interval_days));
+      payload.next_due_date = d.toISOString().split('T')[0];
+    }
+    try {
+      await apiClient.updateMaintenanceReminder(id, editReminder.id, payload);
+      setEditReminder(null);
+      loadMaintenance().catch(console.error);
+      addToast('success', `${editReminder.service_type} updated`);
+    } catch (err: any) {
+      setFormError(err.response?.data?.detail || 'Failed to update reminder');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -2164,6 +2215,13 @@ export default function VehicleDetailPage() {
                         </div>
                         <div className="flex items-center gap-2 ml-4">
                           <span className={`text-xs font-semibold ${s.color}`}>{s.label}</span>
+                          <button
+                            onClick={() => openReminderEdit(r)}
+                            title="Edit reminder"
+                            className="text-slate-500 hover:text-white text-sm leading-none transition-colors"
+                          >
+                            ✎
+                          </button>
                           <button
                             onClick={() => deleteReminder(r.id)}
                             className="text-slate-500 hover:text-red-400 text-lg leading-none transition-colors"
@@ -3394,6 +3452,64 @@ export default function VehicleDetailPage() {
             >
               Share / Save
             </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* Reminder edit modal */}
+      <Modal
+        isOpen={editReminder !== null}
+        onClose={() => setEditReminder(null)}
+        title={editReminder ? `Edit — ${editReminder.service_type}` : 'Edit Reminder'}
+      >
+        {editReminder && (
+          <div className="space-y-4">
+            <FormError msg={formError} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Every (miles)</label>
+                <input type="number" min="0" className="input-field" value={editRemForm.interval_miles}
+                  onChange={(e) => setEditRemForm((p) => ({ ...p, interval_miles: e.target.value }))} onFocus={(e) => e.target.select()} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Every (days)</label>
+                <input type="number" min="0" className="input-field" value={editRemForm.interval_days}
+                  onChange={(e) => setEditRemForm((p) => ({ ...p, interval_days: e.target.value }))} onFocus={(e) => e.target.select()} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Last done at (mi)</label>
+                <input type="number" min="0" className="input-field" value={editRemForm.last_mileage}
+                  onChange={(e) => setEditRemForm((p) => ({ ...p, last_mileage: e.target.value }))} onFocus={(e) => e.target.select()} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Last done on</label>
+                <input type="date" className="input-field" value={editRemForm.last_date}
+                  onChange={(e) => setEditRemForm((p) => ({ ...p, last_date: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Warn before (mi)</label>
+                <input type="number" min="0" className="input-field" value={editRemForm.reminder_miles}
+                  onChange={(e) => setEditRemForm((p) => ({ ...p, reminder_miles: e.target.value }))} onFocus={(e) => e.target.select()} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Fixed target (mi)</label>
+                <input type="number" min="0" className="input-field" value={editRemForm.target_mileage}
+                  onChange={(e) => setEditRemForm((p) => ({ ...p, target_mileage: e.target.value }))} onFocus={(e) => e.target.select()} />
+              </div>
+            </div>
+            <p className="text-slate-500 text-xs">
+              Due point recalculates as "last done + interval" (miles and days independently). Use
+              "fixed target" instead for a one-off absolute odometer reminder.
+              {editRemForm.last_mileage !== '' && editRemForm.interval_miles !== '' && (
+                <span className="text-teal-400"> Will be due at {(Number(editRemForm.last_mileage) + Number(editRemForm.interval_miles)).toLocaleString()} mi.</span>
+              )}
+            </p>
+            <div className="flex gap-3">
+              <button onClick={saveReminderEdit} disabled={saving} className="btn-primary flex-1">
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+              <button onClick={() => setEditReminder(null)} className="btn-secondary flex-1">Cancel</button>
+            </div>
           </div>
         )}
       </Modal>

@@ -47,6 +47,7 @@ export interface Reminder {
   target_mileage?: number;
   reminder_miles?: number;
   last_performed_mileage?: number;
+  last_performed_date?: string;
   next_due_mileage?: number;
   next_due_date?: string;
   is_overdue: boolean;
