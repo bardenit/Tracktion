@@ -104,3 +104,43 @@ _DOC_EXPIRY_PROMPT = (
 @router.post("/document-expiry")
 async def ocr_document_expiry(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     return await _scan(file, _DOC_EXPIRY_PROMPT)
+
+
+_VIN_PROMPT = (
+    "This photo shows a vehicle identification number (VIN) — usually on a door-jamb sticker, "
+    "a windshield plate, a registration card, or an insurance card. A VIN is exactly 17 characters "
+    "of digits and capital letters, and never contains the letters I, O, or Q. Read it character by "
+    "character. Common misreads to watch for: 0 vs O (VINs never contain O), 1 vs I (never I), "
+    "5 vs S, 8 vs B, 2 vs Z. "
+    'Return ONLY valid JSON: {"vin": "<the 17 characters>"} — or {} if you cannot read a complete VIN confidently.'
+)
+
+_VIN_TRANSLIT = {
+    "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+    "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
+    "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9,
+}
+_VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2]
+
+
+def _vin_check_digit_ok(vin: str) -> bool:
+    """North American VIN check digit (position 9). Not all import VINs use it."""
+    total = 0
+    for i, ch in enumerate(vin):
+        value = int(ch) if ch.isdigit() else _VIN_TRANSLIT.get(ch)
+        if value is None:
+            return False
+        total += value * _VIN_WEIGHTS[i]
+    remainder = total % 11
+    expected = "X" if remainder == 10 else str(remainder)
+    return vin[8] == expected
+
+
+@router.post("/vin")
+async def ocr_vin(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    import re
+    result = await _scan(file, _VIN_PROMPT, model="claude-sonnet-5")
+    vin = (result.get("vin") or "").strip().upper().replace(" ", "")
+    if not re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", vin):
+        raise HTTPException(status_code=422, detail="Couldn't read a complete VIN — try a closer, sharper photo of the sticker")
+    return {"vin": vin, "check_digit_ok": _vin_check_digit_ok(vin)}

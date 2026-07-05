@@ -702,6 +702,8 @@ export default function VehicleDetailPage() {
   const [attachDocs, setAttachDocs] = useState<VehicleDocument[]>([]);
   const [attachUploading, setAttachUploading] = useState(false);
   const [seedingReminders, setSeedingReminders] = useState(false);
+  const [seedModal, setSeedModal] = useState(false);
+  const [seedRows, setSeedRows] = useState<{ service_type: string; unit: 'miles' | 'days'; interval: string; last: string; include: boolean; exists: boolean }[]>([]);
   const [docOpening, setDocOpening] = useState<number | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
 
@@ -1236,58 +1238,97 @@ export default function VehicleDetailPage() {
     }
   };
 
-  const seedStandardReminders = async () => {
+  const openSeedModal = () => {
     if (!vehicle) return;
-    setSeedingReminders(true);
     const isDiesel = vehicle.fuel_type === 'diesel';
-    const presets: { service_type: string; interval_miles?: number; interval_days?: number }[] = isDiesel
+    const presets: { service_type: string; unit: 'miles' | 'days'; interval: number }[] = isDiesel
       ? [
-          { service_type: 'Oil Change', interval_miles: 7500, interval_days: 365 },
-          { service_type: 'Fuel Filter', interval_miles: 15000 },
-          { service_type: 'Tire Rotation', interval_miles: 7500 },
-          { service_type: 'Air Filter', interval_miles: 30000 },
-          { service_type: 'Coolant Flush', interval_miles: 60000 },
-          { service_type: 'Transmission Service', interval_miles: 60000 },
+          { service_type: 'Oil Change', unit: 'miles', interval: 7500 },
+          { service_type: 'Fuel Filter', unit: 'miles', interval: 15000 },
+          { service_type: 'Tire Rotation', unit: 'miles', interval: 7500 },
+          { service_type: 'Air Filter', unit: 'miles', interval: 30000 },
+          { service_type: 'Coolant Flush', unit: 'miles', interval: 60000 },
+          { service_type: 'Transmission Service', unit: 'miles', interval: 60000 },
+          { service_type: 'Brake Fluid', unit: 'days', interval: 1095 },
         ]
       : [
-          { service_type: 'Oil Change', interval_miles: 5000, interval_days: 180 },
-          { service_type: 'Tire Rotation', interval_miles: 7500 },
-          { service_type: 'Engine Air Filter', interval_miles: 30000 },
-          { service_type: 'Cabin Air Filter', interval_miles: 30000 },
-          { service_type: 'Coolant Flush', interval_miles: 60000 },
-          { service_type: 'Transmission Service', interval_miles: 60000 },
-          { service_type: 'Spark Plugs', interval_miles: 100000 },
-          { service_type: 'Brake Fluid', interval_days: 1095 },
+          { service_type: 'Oil Change', unit: 'miles', interval: 5000 },
+          { service_type: 'Tire Rotation', unit: 'miles', interval: 7500 },
+          { service_type: 'Engine Air Filter', unit: 'miles', interval: 30000 },
+          { service_type: 'Cabin Air Filter', unit: 'miles', interval: 30000 },
+          { service_type: 'Coolant Flush', unit: 'miles', interval: 60000 },
+          { service_type: 'Transmission Service', unit: 'miles', interval: 60000 },
+          { service_type: 'Spark Plugs', unit: 'miles', interval: 100000 },
+          { service_type: 'Brake Fluid', unit: 'days', interval: 1095 },
         ];
-    const existing = new Set(reminders.map((r) => r.service_type.toLowerCase()));
+    const existing = new Set(reminders.map((r) => r.service_type.trim().toLowerCase()));
+    setSeedRows(presets.map((p) => {
+      // Prefill "last done" from logged service history when available
+      const matches = maintEntries.filter((m) => m.type.trim().toLowerCase() === p.service_type.toLowerCase());
+      let last = '';
+      if (matches.length) {
+        last = p.unit === 'miles'
+          ? String(Math.round(Math.max(...matches.map((m) => m.mileage))))
+          : matches.map((m) => m.date).sort().slice(-1)[0];
+      }
+      return {
+        service_type: p.service_type,
+        unit: p.unit,
+        interval: String(p.interval),
+        last,
+        include: !existing.has(p.service_type.toLowerCase()),
+        exists: existing.has(p.service_type.toLowerCase()),
+      };
+    }));
+    setSeedModal(true);
+  };
+
+  const saveSeededReminders = async () => {
+    if (!vehicle) return;
+    setSeedingReminders(true);
     let added = 0;
-    try {
-      for (const p of presets) {
-        if (existing.has(p.service_type.toLowerCase())) continue;
+    let skipped = 0;
+    let failed = 0;
+    // Re-fetch so a stale list can't cause duplicate-name 400s
+    const fresh = await apiClient.listMaintenanceReminders(id).catch(() => reminders);
+    const existing = new Set((fresh as Reminder[]).map((r) => r.service_type.trim().toLowerCase()));
+    for (const row of seedRows) {
+      if (!row.include) continue;
+      const name = row.service_type.trim();
+      if (existing.has(name.toLowerCase())) { skipped++; continue; }
+      const interval = Number(row.interval);
+      if (!interval || interval <= 0) { failed++; continue; }
+      try {
         const created = await apiClient.createMaintenanceReminder(id, {
-          service_type: p.service_type,
-          interval_miles: p.interval_miles,
-          interval_days: p.interval_days,
+          service_type: name,
+          interval_miles: row.unit === 'miles' ? interval : undefined,
+          interval_days: row.unit === 'days' ? interval : undefined,
           reminder_miles: 500,
         });
-        // Arm the reminder from the current odometer / today
         const update: Record<string, unknown> = {};
-        if (p.interval_miles) update.next_due_mileage = vehicle.current_mileage + p.interval_miles;
-        if (p.interval_days) {
-          const d = new Date();
-          d.setDate(d.getDate() + p.interval_days);
-          update.next_due_date = d.toISOString().split('T')[0];
+        if (row.unit === 'miles') {
+          const base = row.last !== '' ? Number(row.last) : vehicle.current_mileage;
+          update.next_due_mileage = base + interval;
+          if (row.last !== '') update.last_performed_mileage = Number(row.last);
+        } else {
+          const baseDate = row.last !== '' ? new Date(row.last + 'T00:00:00') : new Date();
+          baseDate.setDate(baseDate.getDate() + interval);
+          update.next_due_date = baseDate.toISOString().split('T')[0];
+          if (row.last !== '') update.last_performed_date = row.last;
         }
-        if (Object.keys(update).length) await apiClient.updateMaintenanceReminder(id, created.id, update);
+        await apiClient.updateMaintenanceReminder(id, created.id, update);
         added++;
+      } catch {
+        failed++;
       }
-      loadMaintenance().catch(console.error);
-      addToast('success', added ? `Added ${added} standard reminder${added > 1 ? 's' : ''}` : 'All standard reminders already exist');
-    } catch {
-      addToast('error', 'Failed to seed reminders');
-    } finally {
-      setSeedingReminders(false);
     }
+    loadMaintenance().catch(console.error);
+    setSeedModal(false);
+    setSeedingReminders(false);
+    const parts = [`Added ${added} reminder${added === 1 ? '' : 's'}`];
+    if (skipped) parts.push(`skipped ${skipped} existing`);
+    if (failed) parts.push(`${failed} failed`);
+    addToast(failed ? 'error' : 'success', parts.join(', '));
   };
 
   const openAttachments = async (entry: MaintenanceEntry) => {
@@ -2050,11 +2091,10 @@ export default function VehicleDetailPage() {
               <h2 className="text-lg font-semibold text-white">Reminders</h2>
               <div className="flex gap-2">
                 <button
-                  onClick={seedStandardReminders}
-                  disabled={seedingReminders}
+                  onClick={openSeedModal}
                   className="btn-secondary text-sm"
                 >
-                  {seedingReminders ? 'Seeding…' : 'Seed Standard Set'}
+                  Seed Standard Set
                 </button>
                 <button
                   onClick={() => {
@@ -3356,6 +3396,73 @@ export default function VehicleDetailPage() {
             </button>
           </div>
         )}
+      </Modal>
+
+      {/* Seed standard reminders modal */}
+      <Modal isOpen={seedModal} onClose={() => setSeedModal(false)} title="Seed Standard Reminders">
+        <div className="space-y-4">
+          <p className="text-slate-400 text-sm">
+            These are interval reminders ("every X miles"), not fixed odometer milestones. "Last done"
+            sets each item's starting point — it's prefilled from your service history where possible.
+            Leave it blank to start counting from your current odometer
+            ({vehicle.current_mileage.toLocaleString()} mi) or today's date.
+          </p>
+          <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+            {seedRows.map((row, i) => (
+              <div key={row.service_type} className={`rounded-lg p-3 ${row.exists ? 'bg-slate-800/40 opacity-60' : 'bg-slate-800/60'}`}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={row.include}
+                    disabled={row.exists}
+                    onChange={(e) => setSeedRows((prev) => prev.map((r, j) => j === i ? { ...r, include: e.target.checked } : r))}
+                    className="accent-teal-500"
+                  />
+                  <span className="text-white text-sm font-medium flex-1">{row.service_type}</span>
+                  {row.exists && <span className="text-xs text-slate-500">already set up</span>}
+                </div>
+                {!row.exists && (
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-0.5">
+                        Every ({row.unit === 'miles' ? 'mi' : 'days'})
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="input-field text-sm py-1.5"
+                        value={row.interval}
+                        onChange={(e) => setSeedRows((prev) => prev.map((r, j) => j === i ? { ...r, interval: e.target.value } : r))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-0.5">
+                        Last done {row.unit === 'miles' ? '(mi, blank = now)' : '(blank = today)'}
+                      </label>
+                      <input
+                        type={row.unit === 'miles' ? 'number' : 'date'}
+                        min="0"
+                        className="input-field text-sm py-1.5"
+                        value={row.last}
+                        onChange={(e) => setSeedRows((prev) => prev.map((r, j) => j === i ? { ...r, last: e.target.value } : r))}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={saveSeededReminders}
+              disabled={seedingReminders || seedRows.every((r) => !r.include)}
+              className="btn-primary flex-1"
+            >
+              {seedingReminders ? 'Creating…' : `Create ${seedRows.filter((r) => r.include).length} Reminders`}
+            </button>
+            <button onClick={() => setSeedModal(false)} className="btn-secondary flex-1">Cancel</button>
+          </div>
+        </div>
       </Modal>
 
       {/* Maintenance attachments modal (opened from the service history table) */}

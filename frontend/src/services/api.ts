@@ -391,6 +391,16 @@ class ApiClient {
     return response.data;
   }
 
+  async ocrVin(file: File): Promise<{ vin: string; check_digit_ok: boolean }> {
+    const resized = await resizeImageForUpload(file, 1600, 0.85, 'vin.jpg');
+    const formData = new FormData();
+    formData.append('file', resized);
+    const response = await this.client.post('/ocr/vin', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
   async ocrDocumentExpiry(file: File): Promise<{ expires_on?: string; description?: string; category?: string; amount?: number }> {
     const resized = await resizeImageForUpload(file, 1500, 0.78, 'document.jpg');
     const formData = new FormData();

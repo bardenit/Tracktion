@@ -40,6 +40,24 @@ export default function VehiclesPage() {
   const [error, setError] = useState('');
   const [vinLooking, setVinLooking] = useState(false);
   const [vinLookupDone, setVinLookupDone] = useState(false);
+  const [vinScanning, setVinScanning] = useState(false);
+
+  const handleVinScan = async (file: File) => {
+    setVinScanning(true);
+    setError('');
+    try {
+      const result = await apiClient.ocrVin(file);
+      setForm((prev) => ({ ...prev, vin: result.vin }));
+      setVinLookupDone(false);
+      if (!result.check_digit_ok) {
+        setError('VIN read but its check digit looks off — verify it against the sticker before looking it up.');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Could not read a VIN from that photo — try a closer shot of the sticker.');
+    } finally {
+      setVinScanning(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -272,6 +290,21 @@ export default function VehiclesPage() {
                   }}
                   maxLength={17}
                 />
+                <label className={`btn-secondary px-3 whitespace-nowrap cursor-pointer flex items-center ${vinScanning ? 'opacity-50 pointer-events-none' : ''}`}>
+                  {vinScanning ? 'Reading…' : '📷 Scan'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    disabled={vinScanning}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleVinScan(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
                 <button
                   type="button"
                   onClick={handleVinLookup}
