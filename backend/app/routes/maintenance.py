@@ -200,12 +200,14 @@ def list_maintenance_reminders(
     today = date_type.today()
     changed = False
     for r in reminders:
-        overdue = (
-            (r.next_due_mileage and vehicle.current_mileage >= r.next_due_mileage)
-            or (r.next_due_date and today >= r.next_due_date)
-            or (r.target_mileage and vehicle.current_mileage >= r.target_mileage)
+        # Must be a real bool — and/or chaining yields None for pending
+        # reminders, which poisons the column and 500s response validation
+        overdue = bool(
+            (r.next_due_mileage is not None and vehicle.current_mileage >= r.next_due_mileage)
+            or (r.next_due_date is not None and today >= r.next_due_date)
+            or (r.target_mileage is not None and vehicle.current_mileage >= r.target_mileage)
         )
-        if r.is_overdue != overdue:
+        if bool(r.is_overdue) != overdue or r.is_overdue is None:
             r.is_overdue = overdue
             changed = True
     if changed:

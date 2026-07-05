@@ -48,6 +48,8 @@ def run_migrations():
         f"ALTER TABLE vehicles {add_col} recalls_seen {'JSON' if is_pg else 'TEXT'}",
         f"ALTER TABLE vehicles {add_col} recalls_cache {'JSON' if is_pg else 'TEXT'}",
         f"ALTER TABLE documents {add_col} maintenance_entry_id INTEGER",
+        # Repair rows poisoned by the is_overdue None bug (list endpoint 500)
+        "UPDATE maintenance_reminders SET is_overdue = FALSE WHERE is_overdue IS NULL",
         # Migrate existing needs_order=true rows
         "UPDATE vehicle_parts SET order_status = 'needs_order' WHERE needs_order = true AND order_status IS NULL",
 
