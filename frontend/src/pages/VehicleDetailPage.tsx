@@ -3274,7 +3274,7 @@ export default function VehicleDetailPage() {
                       {(['fl', 'fr', 'rl', 'rr'] as const).map((pos) => (
                         <div key={pos}>
                           <label className="block text-sm text-slate-300 mb-1">{pos.toUpperCase()}</label>
-                          <input type="number" className="input-field" min="0" step="1"
+                          <input type="number" className="input-field" min="0" step="0.25"
                             value={String(tireForm[`tread_${pos}` as keyof typeof tireForm] ?? '')}
                             onChange={(e) => setTireForm((p) => ({ ...p, [`tread_${pos}`]: e.target.value }))} onFocus={(e) => e.target.select()} />
                         </div>
