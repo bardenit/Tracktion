@@ -676,7 +676,7 @@ export default function VehicleDetailPage() {
   const [specsForm, setSpecsForm] = useState<Record<string, string>>({});
 
   // Form state
-  const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
+  const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '', missed_fillup: false });
   const [gpsLoading, setGpsLoading] = useState(false);
   const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
     JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
@@ -831,7 +831,7 @@ export default function VehicleDetailPage() {
 
   const openFuelAdd = () => {
     setEditFuel(null);
-    setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
+    setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '', missed_fillup: false });
     setFormError('');
     setFuelModal(true);
   };
@@ -841,7 +841,7 @@ export default function VehicleDetailPage() {
     const tab = searchParams.get('tab');
     if (tab === 'fuel') {
       setEditFuel(null);
-      setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '' });
+      setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '', missed_fillup: false });
       setFormError('');
       setFuelModal(true);
     } else if (tab === 'maintenance') {
@@ -857,7 +857,7 @@ export default function VehicleDetailPage() {
 
   const openFuelEdit = (e: FuelEntry) => {
     setEditFuel(e);
-    setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '', octane: e.octane ? String(e.octane) : '' });
+    setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '', octane: e.octane ? String(e.octane) : '', missed_fillup: e.missed_fillup ?? false });
     setFormError('');
     setFuelModal(true);
   };
@@ -874,10 +874,11 @@ export default function VehicleDetailPage() {
       location: fuelForm.location || undefined,
       notes: fuelForm.notes || undefined,
       octane: fuelForm.octane ? Number(fuelForm.octane) : undefined,
+      missed_fillup: fuelForm.missed_fillup,
     };
     // Sanity-check the implied MPG against the vehicle's average — usually a
     // typo'd odometer or gallons, occasionally something worth knowing about
-    if (!editFuel && fuelEntries.length >= 3 && payload.gallons > 0) {
+    if (!editFuel && !payload.missed_fillup && fuelEntries.length >= 3 && payload.gallons > 0) {
       const prev = fuelEntries[0];
       const ackKey = `${payload.mileage}|${payload.gallons}`;
       if (prev && payload.mileage > prev.mileage && mpgAnomalyAck !== ackKey) {
@@ -2009,7 +2010,9 @@ export default function VehicleDetailPage() {
                       <td className="px-4 py-3 text-slate-300">${Number(e.cost).toFixed(2)}</td>
                       <td className="px-4 py-3 text-slate-400">${(e.cost / e.gallons).toFixed(3)}</td>
                       <td className="px-4 py-3 text-slate-300">
-                        {e.mpg != null ? Number(e.mpg).toFixed(1) : '—'}
+                        {e.missed_fillup
+                          ? <span className="text-xs px-2 py-0.5 rounded font-medium bg-amber-900/50 text-amber-300" title="Missed fill-up — MPG not computable for this interval">missed</span>
+                          : e.mpg != null ? Number(e.mpg).toFixed(1) : '—'}
                       </td>
                       {vehicle.fuel_type !== 'diesel' && vehicle.fuel_type !== 'electric' && (
                         <td className="px-4 py-3 text-slate-300">{e.octane ? `${e.octane}` : '—'}</td>
@@ -2120,6 +2123,11 @@ export default function VehicleDetailPage() {
                   </select>
                 </div>
               )}
+              <label className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={fuelForm.missed_fillup}
+                  onChange={(e) => setFuelForm((p) => ({ ...p, missed_fillup: e.target.checked }))} />
+                <span>Missed a fill-up since my last entry <span className="block text-xs text-slate-500">Someone else filled the tank without logging it — skip MPG for this entry</span></span>
+              </label>
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
                   {saving ? 'Saving...' : 'Save'}

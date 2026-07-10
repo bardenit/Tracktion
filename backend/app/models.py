@@ -91,6 +91,7 @@ class FuelEntry(Base):
     location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     octane = Column(Integer, nullable=True)
+    missed_fillup = Column(Boolean, default=False)  # Unlogged fill(s) since previous entry — MPG not computable
     mpg = Column(Float, nullable=True)  # Calculated
     cost_per_mile = Column(Float, nullable=True)  # Calculated
     created_at = Column(DateTime, server_default=func.now())

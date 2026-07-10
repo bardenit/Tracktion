@@ -43,6 +43,7 @@ def run_migrations():
         f"ALTER TABLE expenses {add_col} expires_on DATE",
         f"ALTER TABLE vehicle_parts {add_col} needs_order BOOLEAN DEFAULT FALSE",
         f"ALTER TABLE fuel_entries {add_col} octane INTEGER",
+        f"ALTER TABLE fuel_entries {add_col} missed_fillup BOOLEAN DEFAULT FALSE",
         f"ALTER TABLE vehicles {add_col} tank_size_gallons FLOAT",
         f"ALTER TABLE vehicle_parts {add_col} order_status VARCHAR(20)",
         f"ALTER TABLE vehicles {add_col} recalls_seen {'JSON' if is_pg else 'TEXT'}",

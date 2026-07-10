@@ -188,6 +188,7 @@ class FuelEntryCreate(BaseModel):
     location: Optional[str] = Field(None, max_length=255)
     notes: Optional[str] = Field(None, max_length=1000)
     octane: Optional[int] = None
+    missed_fillup: bool = False
 
 
 class FuelEntryResponse(BaseModel):
@@ -200,6 +201,7 @@ class FuelEntryResponse(BaseModel):
     location: Optional[str]
     notes: Optional[str]
     octane: Optional[int] = None
+    missed_fillup: Optional[bool] = False
     mpg: Optional[float]
     cost_per_mile: Optional[float]
     created_at: datetime

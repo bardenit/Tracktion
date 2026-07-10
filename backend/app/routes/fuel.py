@@ -34,7 +34,7 @@ def create_fuel_entry(
 
     mpg = None
     cost_per_mile = None
-    if previous_entry:
+    if previous_entry and not entry_data.missed_fillup:
         miles_driven = entry_data.mileage - previous_entry.mileage
         if miles_driven > 0:
             mpg = miles_driven / entry_data.gallons
@@ -49,6 +49,7 @@ def create_fuel_entry(
         location=entry_data.location,
         notes=entry_data.notes,
         octane=entry_data.octane,
+        missed_fillup=entry_data.missed_fillup,
         mpg=mpg,
         cost_per_mile=cost_per_mile,
     )
@@ -107,16 +108,16 @@ def update_fuel_entry(
     mpg = entry.mpg
     cost_per_mile = entry.cost_per_mile
 
-    if entry.mileage != entry_data.mileage or entry.gallons != entry_data.gallons:
+    if entry.mileage != entry_data.mileage or entry.gallons != entry_data.gallons or bool(entry.missed_fillup) != entry_data.missed_fillup:
         previous_entry = (
             db.query(FuelEntry)
-            .filter(FuelEntry.vehicle_id == vehicle_id, FuelEntry.date < entry_data.date)
+            .filter(FuelEntry.vehicle_id == vehicle_id, FuelEntry.date < entry_data.date, FuelEntry.id != entry.id)
             .order_by(FuelEntry.date.desc())
             .first()
         )
         mpg = None
         cost_per_mile = None
-        if previous_entry:
+        if previous_entry and not entry_data.missed_fillup:
             miles_driven = entry_data.mileage - previous_entry.mileage
             if miles_driven > 0:
                 mpg = miles_driven / entry_data.gallons
@@ -129,6 +130,7 @@ def update_fuel_entry(
     entry.location = entry_data.location
     entry.notes = entry_data.notes
     entry.octane = entry_data.octane
+    entry.missed_fillup = entry_data.missed_fillup
     entry.mpg = mpg
     entry.cost_per_mile = cost_per_mile
 
