@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, FuelEntry
+import hashlib
+import json
+from uuid import UUID
+
+from app.models import User, FuelEntry, FuelIdempotencyOperation
 from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate
 from app.services.fuel_calculations import recalculate_fuel_economy, validate_fuel_entry_order
 from app.auth import get_current_user
@@ -30,6 +34,25 @@ def create_fuel_entry(
 ):
     vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
+    operation_id = entry_data.operation_id
+    payload = entry_data.model_dump(mode="json", exclude={"operation_id"})
+    payload_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if operation_id:
+        try:
+            operation_id = str(UUID(operation_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid operation ID") from exc
+        previous = db.query(FuelIdempotencyOperation).filter(
+            FuelIdempotencyOperation.user_id == current_user.id,
+            FuelIdempotencyOperation.operation_id == operation_id,
+        ).first()
+        if previous:
+            if previous.vehicle_id != vehicle_id or previous.payload_hash != payload_hash:
+                raise HTTPException(status_code=409, detail="Idempotency operation conflict")
+            return previous.fuel_entry
+
     entries = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
     try:
         validate_fuel_entry_order(entries, entry_data.date, entry_data.mileage)
@@ -54,6 +77,15 @@ def create_fuel_entry(
 
     if entry_data.mileage > vehicle.current_mileage:
         vehicle.current_mileage = entry_data.mileage
+
+    if operation_id:
+        db.add(FuelIdempotencyOperation(
+            user_id=current_user.id,
+            operation_id=operation_id,
+            vehicle_id=vehicle_id,
+            payload_hash=payload_hash,
+            fuel_entry_id=entry.id,
+        ))
 
     db.commit()
     db.refresh(entry)

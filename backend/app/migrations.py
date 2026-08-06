@@ -9,7 +9,7 @@ from app.data_config import get_database_url
 from app.schema_bootstrap import reconcile_legacy_schema
 
 
-HEAD_REVISION = "0003_admin_and_refresh_sessions"
+HEAD_REVISION = "0004_offline_fuel_idempotency"
 
 
 def alembic_config(database_url: str) -> Config:

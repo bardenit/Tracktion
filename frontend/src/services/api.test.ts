@@ -55,4 +55,34 @@ describe('apiClient test isolation', () => {
     expect(localStorage.getItem('refreshToken')).toBeNull()
     expect(onLogout).toHaveBeenCalledOnce()
   })
+
+  it('keeps queues isolated by authenticated user and quarantines legacy entries', async () => {
+    localStorage.setItem('tracktion-offline-fuel', JSON.stringify([{ vehicleId: 1, payload: {}, queuedAt: 'old' }]))
+    const { apiClient } = await import('./api')
+    apiClient.setAuthenticatedUser(1)
+    apiClient.queueFuelEntry(3, { partial_fillup: true, missed_fillup: true })
+    apiClient.setAuthenticatedUser(2)
+
+    expect(apiClient.getOfflineFuelQueue()).toEqual([])
+    expect(localStorage.getItem('tracktion-offline-fuel:quarantine')).not.toBeNull()
+
+    apiClient.setAuthenticatedUser(1)
+    expect(apiClient.getOfflineFuelQueue()[0].payload).toMatchObject({ partial_fillup: true, missed_fillup: true })
+  })
+
+  it('retains retryable failures and keeps validation failures visible', async () => {
+    const { apiClient } = await import('./api')
+    apiClient.setAuthenticatedUser(1)
+    apiClient.queueFuelEntry(3, { date: '2026-08-01', mileage: 10, gallons: 1, cost: 4 })
+    apiClient.queueFuelEntry(3, { date: '2026-08-02', mileage: 20, gallons: 1, cost: 4 })
+    axiosClient.post
+      .mockRejectedValueOnce({ response: { status: 503 } })
+      .mockRejectedValueOnce({ response: { status: 422, data: { detail: 'bad mileage' } } })
+
+    const result = await apiClient.syncOfflineFuelEntries()
+
+    expect(result).toEqual({ synced: 0, conflicts: 1, remaining: 2 })
+    expect(apiClient.getOfflineFuelQueue().map((item) => item.status)).toEqual(['pending', 'conflict'])
+    expect(apiClient.getOfflineFuelQueue()[1].conflictReason).toContain('bad mileage')
+  })
 })

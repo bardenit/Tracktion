@@ -61,6 +61,8 @@ function Layout({ children }: { children: React.ReactNode }) {
 
 function App() {
   const checkAuth = useAuthStore((state) => state.checkAuth);
+  const user = useAuthStore((state) => state.user);
+  const authLoading = useAuthStore((state) => state.isLoading);
   const addToast = useToastStore((state) => state.addToast);
 
   useEffect(() => {
@@ -70,16 +72,17 @@ function App() {
   // Sync fill-ups logged offline whenever connectivity returns (or on launch)
   useEffect(() => {
     const flush = async () => {
+      if (authLoading || !user) return;
       if (apiClient.getOfflineFuelQueue().length === 0) return;
-      const { synced, rejected, remaining } = await apiClient.syncOfflineFuelEntries();
+      const { synced, conflicts, remaining } = await apiClient.syncOfflineFuelEntries();
       if (synced > 0) addToast('success', `Synced ${synced} offline fill-up${synced > 1 ? 's' : ''}`);
-      if (rejected > 0) addToast('error', `${rejected} offline fill-up${rejected > 1 ? 's were' : ' was'} rejected by the server`);
+      if (conflicts > 0) addToast('error', `${conflicts} offline fill-up${conflicts > 1 ? 's need' : ' needs'} review`);
       if (remaining > 0) addToast('info', `${remaining} fill-up${remaining > 1 ? 's' : ''} still waiting to sync`);
     };
     flush();
     window.addEventListener('online', flush);
     return () => window.removeEventListener('online', flush);
-  }, [addToast]);
+  }, [addToast, authLoading, user]);
 
   return (
     <ErrorBoundary>

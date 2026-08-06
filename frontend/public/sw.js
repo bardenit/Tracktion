@@ -1,4 +1,4 @@
-const CACHE = 'tracktion-v5';
+const CACHE = 'tracktion-static-v6';
 const STATIC_EXTS = ['.js', '.css', '.woff2', '.woff', '.ttf', '.svg', '.png', '.jpg', '.ico'];
 
 function isStaticAsset(url) {
@@ -19,8 +19,19 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k.startsWith('tracktion-') && k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => Promise.all(clients.map((client) => client.postMessage({ type: 'TRACKTION_SW_ACTIVATED' }))))
+  );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'PURGE_TRACKTION_CACHES') return;
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((key) => key.startsWith('tracktion-') && key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => event.ports[0].postMessage({ ok: true }))
   );
 });
 
@@ -29,6 +40,12 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return;
 
   const url = request.url;
+
+  // API calls must be excluded before extension-based static matching.
+  if (isApiCall(url)) {
+    e.respondWith(fetch(request));
+    return;
+  }
 
   // Static assets: cache-first, refresh in background
   if (isStaticAsset(url)) {
@@ -40,22 +57,6 @@ self.addEventListener('fetch', (e) => {
           return res;
         }).catch(() => cached);
         return cached || fetchPromise;
-      })
-    );
-    return;
-  }
-
-  // API calls: network-first, fall back to cache for offline reading
-  if (isApiCall(url)) {
-    e.respondWith(
-      caches.open(CACHE).then(async (cache) => {
-        try {
-          const res = await fetch(request);
-          if (res.ok) cache.put(request, res.clone());
-          return res;
-        } catch {
-          return cache.match(request) || Response.error();
-        }
       })
     );
     return;

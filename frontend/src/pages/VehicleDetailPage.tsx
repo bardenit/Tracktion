@@ -3,6 +3,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
+import { useAuthStore } from '../stores/authStore';
+import { getUserStringList, setUserStringList } from '../services/userStorage';
 import AnalyticsTab from '../components/AnalyticsTab';
 import type {
   Vehicle, FuelEntry, MaintenanceEntry, Reminder, TripEntry,
@@ -616,6 +618,8 @@ export default function VehicleDetailPage() {
   const { vehicleId } = useParams<{ vehicleId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const authUser = useAuthStore((state) => state.user);
+  const userId = authUser?.id ?? 0;
   const id = Number(vehicleId);
 
   const [activeTab, setActiveTab] = useState<Tab>(
@@ -696,12 +700,12 @@ export default function VehicleDetailPage() {
   const [fuelForm, setFuelForm] = useState(initialFuelForm);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
-    JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
+    getUserStringList(userId, 'customServiceTypes')
   );
   const [customTypesOpen, setCustomTypesOpen] = useState(false);
   const [newTypeInput, setNewTypeInput] = useState('');
   const [customExpenseCategories, setCustomExpenseCategories] = useState<string[]>(() =>
-    JSON.parse(localStorage.getItem('customExpenseCategories') || '[]')
+    getUserStringList(userId, 'customExpenseCategories')
   );
   const [expenseCatsOpen, setExpenseCatsOpen] = useState(false);
   const [newCatInput, setNewCatInput] = useState('');
@@ -1507,14 +1511,14 @@ export default function VehicleDetailPage() {
     if (!trimmed || SERVICE_TYPES.includes(trimmed)) return;
     const updated = [...customServiceTypes, trimmed];
     setCustomServiceTypes(updated);
-    localStorage.setItem('customServiceTypes', JSON.stringify(updated));
+    setUserStringList(userId, 'customServiceTypes', updated);
     setNewTypeInput('');
   };
 
   const removeCustomType = (name: string) => {
     const updated = customServiceTypes.filter((t) => t !== name);
     setCustomServiceTypes(updated);
-    localStorage.setItem('customServiceTypes', JSON.stringify(updated));
+    setUserStringList(userId, 'customServiceTypes', updated);
   };
 
   const BASE_EXPENSE_CATEGORIES = EXPENSE_CATEGORIES.filter((c) => c !== 'other');
@@ -1529,14 +1533,14 @@ export default function VehicleDetailPage() {
     if (!trimmed || ALL_EXPENSE_CATEGORIES.includes(trimmed)) return;
     const updated = [...customExpenseCategories, trimmed];
     setCustomExpenseCategories(updated);
-    localStorage.setItem('customExpenseCategories', JSON.stringify(updated));
+    setUserStringList(userId, 'customExpenseCategories', updated);
     setNewCatInput('');
   };
 
   const removeExpenseCategory = (name: string) => {
     const updated = customExpenseCategories.filter((c) => c !== name);
     setCustomExpenseCategories(updated);
-    localStorage.setItem('customExpenseCategories', JSON.stringify(updated));
+    setUserStringList(userId, 'customExpenseCategories', updated);
   };
 
   const tabs: { id: Tab; label: string }[] = [
@@ -1927,11 +1931,13 @@ export default function VehicleDetailPage() {
       {activeTab === 'fuel' && (
         <div className="space-y-5">
           {(() => {
-            const pending = apiClient.getOfflineFuelQueue().filter((q) => q.vehicleId === id).length;
-            return pending > 0 ? (
+            const queued = apiClient.getOfflineFuelQueue().filter((q) => q.vehicleId === id);
+            const conflicts = queued.filter((q) => q.status === 'conflict').length;
+            const pending = queued.length - conflicts;
+            return queued.length > 0 ? (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-amber-900/20 border border-amber-700/40 text-amber-300">
                 <span>◔</span>
-                <span>{pending} fill-up{pending > 1 ? 's' : ''} logged offline — will sync when you're back online</span>
+                <span>{pending > 0 ? `${pending} fill-up${pending > 1 ? 's' : ''} waiting to sync` : ''}{pending > 0 && conflicts > 0 ? ' · ' : ''}{conflicts > 0 ? `${conflicts} fill-up${conflicts > 1 ? 's need' : ' needs'} review` : ''}</span>
               </div>
             ) : null;
           })()}

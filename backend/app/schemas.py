@@ -182,6 +182,7 @@ class VehiclePartResponse(BaseModel):
 
 # Fuel Entry Schemas
 class FuelEntryCreate(BaseModel):
+    operation_id: Optional[str] = Field(None, min_length=36, max_length=36)
     date: date
     mileage: float
     gallons: float

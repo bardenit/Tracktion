@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Date, Boolean, JSON, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Date, Boolean, JSON, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -22,6 +22,7 @@ class User(Base):
     vehicles = relationship("Vehicle", back_populates="owner")
     collaborations = relationship("VehicleCollaborator", back_populates="user")
     refresh_sessions = relationship("RefreshSession", back_populates="user", cascade="all, delete-orphan")
+    fuel_idempotency_operations = relationship("FuelIdempotencyOperation", back_populates="user", cascade="all, delete-orphan")
 
 
 class RefreshSession(Base):
@@ -71,6 +72,7 @@ class Vehicle(Base):
 
     owner = relationship("User", back_populates="vehicles")
     fuel_entries = relationship("FuelEntry", back_populates="vehicle", cascade="all, delete-orphan")
+    fuel_idempotency_operations = relationship("FuelIdempotencyOperation", back_populates="vehicle", cascade="all, delete-orphan")
     maintenance_entries = relationship("MaintenanceEntry", back_populates="vehicle", cascade="all, delete-orphan")
     expenses = relationship("Expense", back_populates="vehicle", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="vehicle", cascade="all, delete-orphan")
@@ -114,6 +116,23 @@ class FuelEntry(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     vehicle = relationship("Vehicle", back_populates="fuel_entries")
+
+
+class FuelIdempotencyOperation(Base):
+    __tablename__ = "fuel_idempotency_operations"
+    __table_args__ = (UniqueConstraint("user_id", "operation_id", name="uq_fuel_operation_user_id"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    operation_id = Column(String(36), nullable=False)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    payload_hash = Column(String(64), nullable=False)
+    fuel_entry_id = Column(Integer, ForeignKey("fuel_entries.id", ondelete="CASCADE"), nullable=False, unique=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="fuel_idempotency_operations")
+    vehicle = relationship("Vehicle", back_populates="fuel_idempotency_operations")
+    fuel_entry = relationship("FuelEntry")
 
 
 class MaintenanceEntry(Base):

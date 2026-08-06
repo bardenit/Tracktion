@@ -6,7 +6,18 @@ import type {
 } from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api';
-const OFFLINE_FUEL_KEY = 'tracktion-offline-fuel';
+const LEGACY_OFFLINE_FUEL_KEY = 'tracktion-offline-fuel';
+const OFFLINE_FUEL_QUARANTINE_KEY = 'tracktion-offline-fuel:quarantine';
+const OFFLINE_FUEL_VERSION = 2;
+
+export interface OfflineFuelQueueItem {
+  operationId: string;
+  vehicleId: number;
+  payload: Record<string, unknown>;
+  queuedAt: string;
+  status: 'pending' | 'conflict';
+  conflictReason?: string;
+}
 
 function resizeImageForUpload(
   file: File,
@@ -64,9 +75,19 @@ class ApiClient {
   private refreshToken: string | null = null;
   private refreshPromise: Promise<string> | null = null;
   private onLogoutCallback: (() => void) | null = null;
+  private authenticatedUserId: number | null = null;
 
   setOnLogout(cb: () => void) {
     this.onLogoutCallback = cb;
+  }
+
+  setAuthenticatedUser(userId: number | null) {
+    this.authenticatedUserId = userId;
+    const legacy = localStorage.getItem(LEGACY_OFFLINE_FUEL_KEY);
+    if (legacy !== null) {
+      localStorage.setItem(OFFLINE_FUEL_QUARANTINE_KEY, legacy);
+      localStorage.removeItem(LEGACY_OFFLINE_FUEL_KEY);
+    }
   }
 
   constructor() {
@@ -421,45 +442,68 @@ class ApiClient {
   // ── Offline fuel queue ──────────────────────────────────────────────────
   // Fill-ups logged with no signal are stored locally and synced when back online.
 
-  getOfflineFuelQueue(): { vehicleId: number; payload: any; queuedAt: string }[] {
+  private offlineFuelKey(): string | null {
+    return this.authenticatedUserId === null
+      ? null
+      : `tracktion-offline-fuel:v${OFFLINE_FUEL_VERSION}:user:${this.authenticatedUserId}`;
+  }
+
+  getOfflineFuelQueue(): OfflineFuelQueueItem[] {
+    const key = this.offlineFuelKey();
+    if (!key) return [];
     try {
-      return JSON.parse(localStorage.getItem(OFFLINE_FUEL_KEY) || '[]');
+      const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
   }
 
   queueFuelEntry(vehicleId: number, payload: any) {
+    const key = this.offlineFuelKey();
+    if (!key) throw new Error('Authentication must resolve before queueing offline fuel');
     const queue = this.getOfflineFuelQueue();
-    queue.push({ vehicleId, payload, queuedAt: new Date().toISOString() });
-    localStorage.setItem(OFFLINE_FUEL_KEY, JSON.stringify(queue));
+    const operationId = crypto.randomUUID();
+    queue.push({ operationId, vehicleId, payload: { ...payload }, queuedAt: new Date().toISOString(), status: 'pending' });
+    localStorage.setItem(key, JSON.stringify(queue));
   }
 
-  async syncOfflineFuelEntries(): Promise<{ synced: number; rejected: number; remaining: number }> {
+  async syncOfflineFuelEntries(): Promise<{ synced: number; conflicts: number; remaining: number }> {
+    const key = this.offlineFuelKey();
+    if (!key) return { synced: 0, conflicts: 0, remaining: 0 };
     const queue = this.getOfflineFuelQueue();
-    if (queue.length === 0) return { synced: 0, rejected: 0, remaining: 0 };
+    if (queue.length === 0) return { synced: 0, conflicts: 0, remaining: 0 };
 
     // Oldest fill-up first so server-side mileage validation sees them in order
     queue.sort((a, b) =>
-      (a.payload.date || '').localeCompare(b.payload.date || '') || a.queuedAt.localeCompare(b.queuedAt));
+      String(a.payload.date || '').localeCompare(String(b.payload.date || '')) || a.queuedAt.localeCompare(b.queuedAt));
 
     let synced = 0;
-    let rejected = 0;
+    let conflicts = 0;
     const remaining: typeof queue = [];
     for (const item of queue) {
+      if (item.status === 'conflict') {
+        conflicts++;
+        remaining.push(item);
+        continue;
+      }
       try {
-        await this.createFuelEntry(item.vehicleId, item.payload);
+        await this.createFuelEntry(item.vehicleId, { ...item.payload, operation_id: item.operationId });
         synced++;
       } catch (err: any) {
-        if (err?.response) {
-          rejected++; // server rejected it (e.g. mileage conflict) — retrying won't help
-        } else {
-          remaining.push(item); // still offline, keep for next attempt
+        const status = err?.response?.status;
+        if (status === 400 || status === 409 || status === 422) {
+          const detail = err?.response?.data?.detail;
+          item.status = 'conflict';
+          item.conflictReason = typeof detail === 'string' ? detail : 'The server rejected this fill-up';
+          conflicts++;
         }
+        // Network, auth, timeout, rate limit, server, and validation failures all remain visible.
+        remaining.push(item);
       }
     }
-    localStorage.setItem(OFFLINE_FUEL_KEY, JSON.stringify(remaining));
-    return { synced, rejected, remaining: remaining.length };
+    localStorage.setItem(key, JSON.stringify(remaining));
+    return { synced, conflicts, remaining: remaining.length };
   }
 
   async listFuelEntries(vehicleId: number): Promise<FuelEntry[]> {
