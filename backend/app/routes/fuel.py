@@ -9,6 +9,7 @@ from uuid import UUID
 from app.models import User, FuelEntry, FuelIdempotencyOperation
 from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate
 from app.services.fuel_calculations import recalculate_fuel_economy, validate_fuel_entry_order
+from app.services.vehicle_mileage import observe_vehicle_mileage
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
 
@@ -75,8 +76,7 @@ def create_fuel_entry(
     db.flush()
     recalculate_vehicle_fuel_economy(vehicle_id, db)
 
-    if entry_data.mileage > vehicle.current_mileage:
-        vehicle.current_mileage = entry_data.mileage
+    observe_vehicle_mileage(db, vehicle_id, entry_data.mileage)
 
     if operation_id:
         db.add(FuelIdempotencyOperation(
@@ -173,8 +173,7 @@ def update_fuel_entry(
         db.flush()
         recalculate_vehicle_fuel_economy(vehicle_id, db)
 
-    if entry_data.mileage > vehicle.current_mileage:
-        vehicle.current_mileage = entry_data.mileage
+    observe_vehicle_mileage(db, vehicle_id, entry_data.mileage)
 
     db.commit()
     db.refresh(entry)
@@ -219,9 +218,10 @@ def get_fuel_stats(
         if days > 0 and miles > 0:
             miles_per_day = miles / days
 
-    mpg_values = [e.mpg for e in entries if e.mpg is not None]
+    ordered = sorted(entries, key=lambda e: (e.date, e.mileage, e.id))
+    valid_miles, valid_gallons = recalculate_fuel_economy(ordered)
     return {
-        "average_mpg": sum(mpg_values) / len(mpg_values) if mpg_values else None,
+        "average_mpg": valid_miles / valid_gallons if valid_gallons else None,
         "total_spent": sum(e.cost for e in entries),
         "total_gallons": sum(e.gallons for e in entries),
         "entries_count": len(entries),

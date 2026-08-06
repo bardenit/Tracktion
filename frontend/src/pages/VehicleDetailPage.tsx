@@ -1260,18 +1260,12 @@ export default function VehicleDetailPage() {
   const startReminderNow = async (r: Reminder) => {
     if (!vehicle) return;
     const todayStr = today();
-    const update: Record<string, unknown> = {
-      last_performed_mileage: vehicle.current_mileage,
-      last_performed_date: todayStr,
-    };
-    if (r.interval_miles) update.next_due_mileage = vehicle.current_mileage + r.interval_miles;
-    if (r.interval_days) {
-      const d = new Date();
-      d.setDate(d.getDate() + r.interval_days);
-      update.next_due_date = d.toISOString().split('T')[0];
-    }
     try {
-      await apiClient.updateMaintenanceReminder(id, r.id, update);
+      await apiClient.completeMaintenanceReminder(id, r.id, {
+        operation_id: crypto.randomUUID(), date: todayStr,
+        mileage: vehicle.current_mileage, cost: 0,
+        notes: 'Reminder interval started',
+      });
       loadMaintenance().catch(console.error);
       addToast('success', `${r.service_type} interval started from today`);
     } catch {
@@ -1302,20 +1296,7 @@ export default function VehicleDetailPage() {
       interval_days: num(f.interval_days),
       reminder_miles: num(f.reminder_miles),
       target_mileage: num(f.target_mileage),
-      last_performed_mileage: num(f.last_mileage),
-      last_performed_date: f.last_date || null,
     };
-    // Recompute due points from the edited starting values
-    if (f.last_mileage !== '' && f.interval_miles !== '') {
-      payload.next_due_mileage = Number(f.last_mileage) + Number(f.interval_miles);
-    } else if (f.target_mileage !== '') {
-      payload.next_due_mileage = Number(f.target_mileage);
-    }
-    if (f.last_date && f.interval_days !== '') {
-      const d = new Date(f.last_date + 'T00:00:00');
-      d.setDate(d.getDate() + Number(f.interval_days));
-      payload.next_due_date = d.toISOString().split('T')[0];
-    }
     try {
       await apiClient.updateMaintenanceReminder(id, editReminder.id, payload);
       setEditReminder(null);
@@ -1395,18 +1376,13 @@ export default function VehicleDetailPage() {
           interval_days: row.unit === 'days' ? interval : undefined,
           reminder_miles: 500,
         });
-        const update: Record<string, unknown> = {};
-        if (row.unit === 'miles') {
-          const base = row.last !== '' ? Number(row.last) : vehicle.current_mileage;
-          update.next_due_mileage = base + interval;
-          if (row.last !== '') update.last_performed_mileage = Number(row.last);
-        } else {
-          const baseDate = row.last !== '' ? new Date(row.last + 'T00:00:00') : new Date();
-          baseDate.setDate(baseDate.getDate() + interval);
-          update.next_due_date = baseDate.toISOString().split('T')[0];
-          if (row.last !== '') update.last_performed_date = row.last;
-        }
-        await apiClient.updateMaintenanceReminder(id, created.id, update);
+        await apiClient.completeMaintenanceReminder(id, created.id, {
+          operation_id: crypto.randomUUID(),
+          date: row.unit === 'days' && row.last !== '' ? row.last : today(),
+          mileage: row.unit === 'miles' && row.last !== '' ? Number(row.last) : vehicle.current_mileage,
+          cost: 0,
+          notes: 'Reminder baseline',
+        });
         added++;
       } catch {
         failed++;

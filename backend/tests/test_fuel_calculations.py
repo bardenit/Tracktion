@@ -18,6 +18,18 @@ def entry(mileage, gallons, cost, *, partial_fillup=False, missed_fillup=False):
 
 
 class RecalculateFuelEconomyTests(unittest.TestCase):
+    def test_returns_weighted_aggregate_miles_and_gallons(self):
+        entries = [
+            entry(1_000, 5, 15),
+            entry(1_100, 5, 15),
+            entry(1_400, 10, 30),
+        ]
+
+        miles, gallons = recalculate_fuel_economy(entries)
+
+        self.assertEqual((miles, gallons), (400, 15))
+        self.assertAlmostEqual(miles / gallons, 26.6666667)
+
     def test_partial_fill_is_combined_with_next_full_fill(self):
         entries = [
             entry(1_000, 10, 30),

@@ -37,11 +37,13 @@ def validate_fuel_entry_order(
         raise ValueError(f"Mileage must be less than {int(following.mileage):,} mi for this date")
 
 
-def recalculate_fuel_economy(entries: Iterable[FuelEntryLike]) -> None:
+def recalculate_fuel_economy(entries: Iterable[FuelEntryLike]) -> tuple[float, float]:
     last_full = None
     interval_gallons = 0.0
     interval_cost = 0.0
     interval_is_valid = True
+    valid_miles = 0.0
+    valid_gallons = 0.0
 
     for entry in entries:
         entry.mpg = None
@@ -64,8 +66,12 @@ def recalculate_fuel_economy(entries: Iterable[FuelEntryLike]) -> None:
         if interval_is_valid and miles_driven > 0 and interval_gallons > 0:
             entry.mpg = miles_driven / interval_gallons
             entry.cost_per_mile = interval_cost / miles_driven
+            valid_miles += miles_driven
+            valid_gallons += interval_gallons
 
         last_full = entry
         interval_gallons = 0.0
         interval_cost = 0.0
         interval_is_valid = True
+
+    return valid_miles, valid_gallons

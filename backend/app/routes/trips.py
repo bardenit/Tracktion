@@ -18,10 +18,9 @@ def create_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     trip = TripEntry(vehicle_id=vehicle_id, **trip_data.model_dump())
     db.add(trip)
-    vehicle.current_mileage = (vehicle.current_mileage or 0) + trip_data.miles
     db.commit()
     db.refresh(trip)
     return trip
@@ -45,13 +44,10 @@ def update_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     trip = db.query(TripEntry).filter(TripEntry.id == trip_id, TripEntry.vehicle_id == vehicle_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-
-    if trip_data.miles is not None and trip_data.miles != trip.miles:
-        vehicle.current_mileage = (vehicle.current_mileage or 0) + (trip_data.miles - trip.miles)
 
     for field, value in trip_data.model_dump(exclude_unset=True).items():
         setattr(trip, field, value)
@@ -68,11 +64,10 @@ def delete_trip(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     trip = db.query(TripEntry).filter(TripEntry.id == trip_id, TripEntry.vehicle_id == vehicle_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    vehicle.current_mileage = max(0, (vehicle.current_mileage or 0) - trip.miles)
     db.delete(trip)
     db.commit()
     return {"message": "Trip deleted"}

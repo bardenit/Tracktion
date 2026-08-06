@@ -153,6 +153,22 @@ class MaintenanceEntry(Base):
     vehicle = relationship("Vehicle", back_populates="maintenance_entries")
 
 
+class MaintenanceCompletionOperation(Base):
+    __tablename__ = "maintenance_completion_operations"
+    __table_args__ = (UniqueConstraint("user_id", "operation_id", name="uq_maintenance_completion_user_id"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    operation_id = Column(String(36), nullable=False)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    reminder_id = Column(Integer, ForeignKey("maintenance_reminders.id", ondelete="CASCADE"), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    maintenance_entry_id = Column(Integer, ForeignKey("maintenance_entries.id", ondelete="CASCADE"), nullable=False, unique=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    maintenance_entry = relationship("MaintenanceEntry")
+
+
 class Expense(Base):
     __tablename__ = "expenses"
 
@@ -343,6 +359,7 @@ __all__ = [
     "Expense",
     "Document",
     "MaintenanceReminder",
+    "MaintenanceCompletionOperation",
     "VehiclePart",
     "TripEntry",
     "InspectionItem",

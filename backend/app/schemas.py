@@ -301,10 +301,15 @@ class MaintenanceReminderUpdate(BaseModel):
     interval_days: Optional[int] = None
     target_mileage: Optional[float] = None
     reminder_miles: Optional[int] = None
-    last_performed_mileage: Optional[float] = None
-    last_performed_date: Optional[date] = None
-    next_due_mileage: Optional[float] = None
-    next_due_date: Optional[date] = None
+
+
+class MaintenanceCompletionCreate(BaseModel):
+    operation_id: str = Field(..., min_length=36, max_length=36)
+    date: date
+    mileage: float
+    cost: float = 0
+    service_provider: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class MaintenanceReminderResponse(BaseModel):

@@ -159,22 +159,12 @@ export default function DashboardPage() {
     if (!markDoneReminder || !markDoneVehicleId) return;
     setMarkDoneSaving(true);
     try {
-      await apiClient.createMaintenanceEntry(markDoneVehicleId, {
+      await apiClient.completeMaintenanceReminder(markDoneVehicleId, markDoneReminder.id, {
+        operation_id: crypto.randomUUID(),
         date: markDoneForm.date, mileage: markDoneForm.mileage,
-        type: markDoneReminder.service_type, cost: markDoneForm.cost,
+        cost: markDoneForm.cost,
         notes: markDoneForm.notes || undefined,
       });
-      const update: Record<string, unknown> = {
-        last_performed_mileage: markDoneForm.mileage,
-        last_performed_date: markDoneForm.date,
-      };
-      if (markDoneReminder.interval_miles) update.next_due_mileage = markDoneForm.mileage + markDoneReminder.interval_miles;
-      if (markDoneReminder.interval_days) {
-        const d = new Date(markDoneForm.date + 'T00:00:00');
-        d.setDate(d.getDate() + markDoneReminder.interval_days);
-        update.next_due_date = d.toISOString().split('T')[0];
-      }
-      await apiClient.updateMaintenanceReminder(markDoneVehicleId, markDoneReminder.id, update);
       // Refresh this vehicle's data
       const v = vehicles.find((x) => x.id === markDoneVehicleId);
       if (v) loadVehicleData(v);

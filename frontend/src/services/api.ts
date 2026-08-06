@@ -592,6 +592,11 @@ class ApiClient {
     return response.data;
   }
 
+  async completeMaintenanceReminder(vehicleId: number, reminderId: number, completionData: any) {
+    const response = await this.client.post(`/maintenance/${vehicleId}/reminders/${reminderId}/complete`, completionData);
+    return response.data;
+  }
+
   async deleteMaintenanceReminder(vehicleId: number, reminderId: number) {
     const response = await this.client.delete(`/maintenance/${vehicleId}/reminders/${reminderId}`);
     return response.data;
