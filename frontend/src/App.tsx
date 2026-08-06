@@ -44,6 +44,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((state) => state.user);
+  if (!user?.is_admin) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
@@ -109,7 +115,7 @@ function App() {
           path="/settings"
           element={
             <ProtectedRoute>
-              <Layout><SettingsPage /></Layout>
+              <AdminRoute><Layout><SettingsPage /></Layout></AdminRoute>
             </ProtectedRoute>
           }
         />

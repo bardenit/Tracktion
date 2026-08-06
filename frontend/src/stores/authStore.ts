@@ -1,11 +1,6 @@
 import { create } from 'zustand';
 import { apiClient } from '../services/api';
-
-interface User {
-  id: number;
-  email: string;
-  created_at: string;
-}
+import type { User } from '../types';
 
 interface AuthStore {
   user: User | null;

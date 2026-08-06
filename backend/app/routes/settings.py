@@ -2,6 +2,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import create_engine, text
 from app.auth import get_current_user
+from app.deps import require_admin
 from app.models import User
 from app.data_config import get_config, save_config, get_database_url
 from app.schemas import (
@@ -11,7 +12,7 @@ from app.schemas import (
 )
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 # ── Database ──────────────────────────────────────────────────────────────────

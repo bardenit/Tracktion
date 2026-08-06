@@ -59,10 +59,10 @@ function resizeImageForUpload(
 
 class ApiClient {
   private client: AxiosInstance;
+  private refreshClient: AxiosInstance;
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
-  private isRefreshing = false;
-  private refreshQueue: Array<(token: string | null) => void> = [];
+  private refreshPromise: Promise<string> | null = null;
   private onLogoutCallback: (() => void) | null = null;
 
   setOnLogout(cb: () => void) {
@@ -75,6 +75,10 @@ class ApiClient {
       headers: {
         'Content-Type': 'application/json',
       },
+    });
+    this.refreshClient = axios.create({
+      baseURL: API_BASE_URL,
+      headers: { 'Content-Type': 'application/json' },
     });
 
     // Load tokens from localStorage
@@ -92,37 +96,16 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
-        if (error.response?.status === 401 && this.refreshToken) {
+        if (error.response?.status === 401 && this.refreshToken && !error.config?._retry) {
           const originalConfig = error.config;
-
-          if (this.isRefreshing) {
-            // Queue this request until the in-flight refresh completes
-            return new Promise((resolve, reject) => {
-              this.refreshQueue.push((token) => {
-                if (!token) { reject(error); return; }
-                originalConfig.headers.Authorization = `Bearer ${token}`;
-                resolve(this.client(originalConfig));
-              });
-            });
-          }
-
-          this.isRefreshing = true;
+          originalConfig._retry = true;
           try {
-            const response = await this.refreshAccessToken();
-            this.accessToken = response.access_token;
-            this.refreshToken = response.refresh_token;
-            this.saveTokens();
-            this.refreshQueue.forEach((cb) => cb(this.accessToken));
-            this.refreshQueue = [];
-            this.isRefreshing = false;
-
-            originalConfig.headers.Authorization = `Bearer ${this.accessToken}`;
+            const token = await this.getSharedRefresh();
+            originalConfig.headers.Authorization = `Bearer ${token}`;
             return this.client(originalConfig);
-          } catch {
-            this.refreshQueue.forEach((cb) => cb(null));
-            this.refreshQueue = [];
-            this.isRefreshing = false;
+          } catch (refreshError) {
             this.logout();
+            return Promise.reject(refreshError);
           }
         }
         return Promise.reject(error);
@@ -156,8 +139,22 @@ class ApiClient {
 
   async refreshAccessToken() {
     if (!this.refreshToken) throw new Error('No refresh token');
-    const response = await this.client.post('/auth/refresh', { refresh_token: this.refreshToken });
+    const response = await this.refreshClient.post('/auth/refresh', { refresh_token: this.refreshToken });
     return response.data;
+  }
+
+  private getSharedRefresh(): Promise<string> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.refreshAccessToken()
+        .then((response) => {
+          this.accessToken = response.access_token;
+          this.refreshToken = response.refresh_token;
+          this.saveTokens();
+          return response.access_token;
+        })
+        .finally(() => { this.refreshPromise = null; });
+    }
+    return this.refreshPromise;
   }
 
   async getCurrentUser() {
@@ -166,6 +163,10 @@ class ApiClient {
   }
 
   logout() {
+    const refreshToken = this.refreshToken;
+    if (refreshToken) {
+      void this.refreshClient.post('/auth/logout', { refresh_token: refreshToken }).catch(() => undefined);
+    }
     this.accessToken = null;
     this.refreshToken = null;
     localStorage.removeItem('accessToken');

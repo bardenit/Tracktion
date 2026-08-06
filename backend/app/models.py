@@ -17,9 +17,25 @@ class User(Base):
     failed_login_attempts = Column(Integer, default=0)
     last_failed_login_at = Column(DateTime, nullable=True)
     locked_until = Column(DateTime, nullable=True)
+    is_admin = Column(Boolean, nullable=False, default=False, server_default="0")
 
     vehicles = relationship("Vehicle", back_populates="owner")
     collaborations = relationship("VehicleCollaborator", back_populates="user")
+    refresh_sessions = relationship("RefreshSession", back_populates="user", cascade="all, delete-orphan")
+
+
+class RefreshSession(Base):
+    __tablename__ = "refresh_sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    jti_hash = Column(String(64), nullable=False, unique=True, index=True)
+    family_id = Column(String(36), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="refresh_sessions")
 
 
 class FuelType(str, enum.Enum):

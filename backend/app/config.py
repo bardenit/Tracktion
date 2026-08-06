@@ -24,3 +24,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_production_secret(config: Settings) -> None:
+    secret = config.JWT_SECRET_KEY.strip()
+    if not config.DEBUG and (secret == "change-me-in-production" or len(secret) < 32):
+        raise RuntimeError("JWT_SECRET_KEY must be a non-default secret of at least 32 characters in production")

@@ -16,6 +16,13 @@ export interface Vehicle {
   specs_overrides?: Record<string, unknown>;
 }
 
+export interface User {
+  id: number;
+  email: string;
+  created_at: string;
+  is_admin: boolean;
+}
+
 export interface FuelEntry {
   id: number;
   date: string;

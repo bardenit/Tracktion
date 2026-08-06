@@ -397,7 +397,10 @@ def remove_collaborator(
     if vehicle.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    collaborator = db.query(VehicleCollaborator).filter(VehicleCollaborator.id == collaborator_id).first()
+    collaborator = db.query(VehicleCollaborator).filter(
+        VehicleCollaborator.id == collaborator_id,
+        VehicleCollaborator.vehicle_id == vehicle_id,
+    ).first()
     if not collaborator:
         raise HTTPException(status_code=404, detail="Collaborator not found")
 

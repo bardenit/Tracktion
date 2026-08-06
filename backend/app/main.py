@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from app.config import settings
+from app.config import settings, validate_production_secret
 from app.database import engine
 from app.migrations import require_database_current
 from app.limiter import limiter
@@ -14,6 +14,7 @@ from app.routes import settings as settings_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_production_secret(settings)
     if settings.JWT_SECRET_KEY == "change-me-in-production":
         if not settings.DEBUG:
             raise RuntimeError(

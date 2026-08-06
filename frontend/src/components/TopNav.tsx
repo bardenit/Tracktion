@@ -43,7 +43,7 @@ export default function TopNav() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-slate-400 text-sm hidden md:block">{user?.email}</span>
-          {navLink('/settings', 'Settings')}
+          {user?.is_admin && navLink('/settings', 'Settings')}
           <button
             onClick={handleLogout}
             className="text-sm text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded transition-colors"

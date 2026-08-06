@@ -4,9 +4,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from app.auth import get_current_user
 from app.models import User
+from app.deps import require_admin
 from app.data_config import get_config
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 _FUEL_PROMPT = (
     "Extract fuel purchase details from this gas pump display or fuel receipt photo. "

@@ -22,8 +22,8 @@ def test_repeated_upgrade_is_clean(db_url):
 
 
 def test_unversioned_database_is_not_ready(db_url):
-    from app.migrations import require_database_current
+    from app.migrations import HEAD_REVISION, require_database_current
 
     engine = create_engine(db_url)
-    with pytest.raises(RuntimeError, match="expected .*0002_legacy_compatibility"):
+    with pytest.raises(RuntimeError, match=f"expected .*{HEAD_REVISION}"):
         require_database_current(engine)
