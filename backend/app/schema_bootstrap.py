@@ -22,6 +22,16 @@ KNOWN_ADDITIVE_COLUMNS = {
     "fuel_entries": {"octane", "missed_fillup", "partial_fillup"},
     "documents": {"maintenance_entry_id", "storage_profile_id", "content_type", "byte_length", "sha256"},
 }
+KNOWN_RETIRED_COLUMNS = {
+    "vehicles": {
+        "smartcar_vehicle_id",
+        "smartcar_user_id",
+        "smartcar_access_token",
+        "smartcar_refresh_token",
+        "smartcar_token_expires_at",
+        "smartcar_last_synced_at",
+    },
+}
 
 
 class UnknownSchemaError(RuntimeError):
@@ -58,7 +68,7 @@ def reconcile_legacy_schema(engine: Engine) -> ReconciliationResult:
     missing_by_table = {}
     for table_name in tables:
         actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
-        unknown_columns = actual_columns - expected[table_name]
+        unknown_columns = actual_columns - expected[table_name] - KNOWN_RETIRED_COLUMNS.get(table_name, set())
         missing_columns = expected[table_name] - actual_columns
         if unknown_columns:
             raise UnknownSchemaError(f"unknown columns on {table_name}: {sorted(unknown_columns)}")
