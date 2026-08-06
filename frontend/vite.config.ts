@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import type { UserConfig } from 'vitest/config'
 
 export default defineConfig({
   plugins: [react()],
@@ -19,4 +20,10 @@ export default defineConfig({
       },
     },
   },
-})
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    clearMocks: true,
+    restoreMocks: true,
+  },
+} as UserConfig)

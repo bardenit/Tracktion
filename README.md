@@ -47,9 +47,6 @@ nano .env
 # Start all services
 docker-compose up -d
 
-# Initialize database
-docker-compose exec api python -m alembic upgrade head
-
 # Access the app
 # Frontend: http://localhost:3000
 # API: http://localhost:8000
@@ -66,6 +63,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
+
+Run `python -m app.migrations` before local startup and after upgrading. Container
+startup runs this command automatically and exits instead of serving traffic if
+schema fingerprinting or an Alembic upgrade fails. Unknown legacy schema drift is
+never stamped automatically; back up the database and resolve it explicitly.
 
 **Frontend:**
 ```bash

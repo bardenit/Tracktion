@@ -1,19 +1,16 @@
 import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
 from app.config import settings
-from app.database import engine, Base, run_migrations
+from app.database import engine
+from app.migrations import require_database_current
 from app.limiter import limiter
 from app.routes import auth, vehicles, fuel, maintenance, expenses, documents, parts, trips, ocr, inspection, tires
 from app.routes import settings as settings_router
-
-Base.metadata.create_all(bind=engine)
-run_migrations()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,7 +26,12 @@ async def lifespan(app: FastAPI):
             "CORS_ORIGINS is set to wildcard '*'. "
             "Set a specific origin via the CORS_ORIGINS environment variable."
         )
-    yield
+    try:
+        require_database_current(engine)
+        app.state.database_ready = True
+        yield
+    finally:
+        app.state.database_ready = False
 
 
 app = FastAPI(
@@ -78,5 +80,13 @@ app.include_router(tires.router, prefix="/api/tires", tags=["tires"])
 
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy"}
+async def health(request: Request, response: Response):
+    try:
+        require_database_current(engine)
+        database_ready = bool(getattr(request.app.state, "database_ready", False))
+    except Exception:
+        database_ready = False
+    if not database_ready:
+        response.status_code = 503
+        return {"status": "unhealthy", "database": "unavailable"}
+    return {"status": "healthy", "database": "ready"}
