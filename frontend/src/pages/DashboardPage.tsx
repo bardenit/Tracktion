@@ -103,6 +103,7 @@ export default function DashboardPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [cardData, setCardData] = useState<Record<number, VehicleCardData>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [markDoneReminder, setMarkDoneReminder] = useState<Reminder | null>(null);
   const [markDoneVehicleId, setMarkDoneVehicleId] = useState<number | null>(null);
   const [markDoneVehicle, setMarkDoneVehicle] = useState<Vehicle | null>(null);
@@ -132,7 +133,10 @@ export default function DashboardPage() {
         setVehicles(data);
         data.forEach((v) => loadVehicleData(v));
       })
-      .catch(console.error)
+      .catch((error) => {
+        console.error(error);
+        setLoadError(true);
+      })
       .finally(() => setLoading(false));
   }, [loadVehicleData]);
 
@@ -174,6 +178,16 @@ export default function DashboardPage() {
   };
 
   if (loading) return <div className="flex items-center justify-center py-20"><p className="text-slate-400">Loading...</p></div>;
+
+  if (loadError) {
+    return (
+      <div className="text-center py-20">
+        <h2 className="text-xl font-semibold text-white mb-2">Unable to load vehicles</h2>
+        <p className="text-slate-400 mb-6">Tracktion could not reach the server. Your vehicle data has not been changed.</p>
+        <button onClick={() => window.location.reload()} className="btn-primary">Retry</button>
+      </div>
+    );
+  }
 
   if (vehicles.length === 0) {
     return (
