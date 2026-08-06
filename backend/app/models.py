@@ -69,13 +69,15 @@ class Vehicle(Base):
     recalls_cache = Column(JSON, nullable=True)  # {"campaigns": [{campaign_number, component}], "checked_at": iso}
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    primary_photo_id = Column(Integer, ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
 
     owner = relationship("User", back_populates="vehicles")
     fuel_entries = relationship("FuelEntry", back_populates="vehicle", cascade="all, delete-orphan")
     fuel_idempotency_operations = relationship("FuelIdempotencyOperation", back_populates="vehicle", cascade="all, delete-orphan")
     maintenance_entries = relationship("MaintenanceEntry", back_populates="vehicle", cascade="all, delete-orphan")
     expenses = relationship("Expense", back_populates="vehicle", cascade="all, delete-orphan")
-    documents = relationship("Document", back_populates="vehicle", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="vehicle", cascade="all, delete-orphan", foreign_keys="Document.vehicle_id")
+    primary_photo = relationship("Document", foreign_keys=[primary_photo_id], post_update=True)
     maintenance_reminders = relationship("MaintenanceReminder", back_populates="vehicle", cascade="all, delete-orphan")
     collaborators = relationship("VehicleCollaborator", back_populates="vehicle", cascade="all, delete-orphan")
     parts = relationship("VehiclePart", back_populates="vehicle", cascade="all, delete-orphan")
@@ -173,12 +175,71 @@ class Document(Base):
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), index=True)
     maintenance_entry_id = Column(Integer, ForeignKey("maintenance_entries.id"), nullable=True, index=True)
     filename = Column(String(255))
-    storage_path = Column(String(512))  # Relative path in storage backend
+    storage_path = Column(String(512), nullable=False)  # Immutable object key
+    storage_profile_id = Column(Integer, ForeignKey("storage_profiles.id"), nullable=True, index=True)
+    content_type = Column(String(100), nullable=True)
+    byte_length = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True)
     ocr_text = Column(Text, nullable=True)  # Extracted text (Phase 2)
     document_type = Column(String(50))  # receipt, service, insurance, registration, warranty, other
     uploaded_at = Column(DateTime, server_default=func.now())
 
-    vehicle = relationship("Vehicle", back_populates="documents")
+    vehicle = relationship("Vehicle", back_populates="documents", foreign_keys=[vehicle_id])
+
+
+class StorageProfile(Base):
+    __tablename__ = "storage_profiles"
+
+    id = Column(Integer, primary_key=True)
+    profile_uuid = Column(String(36), nullable=False, unique=True, index=True)
+    backend_type = Column(String(20), nullable=False)
+    configuration = Column(JSON, nullable=False)
+    credential_version = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+
+class StorageMigration(Base):
+    __tablename__ = "storage_migrations"
+
+    id = Column(Integer, primary_key=True)
+    source_profile_id = Column(Integer, ForeignKey("storage_profiles.id"), nullable=False)
+    destination_profile_id = Column(Integer, ForeignKey("storage_profiles.id"), nullable=False)
+    candidate_credential_version = Column(Integer, nullable=False)
+    state = Column(String(20), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class StorageMigrationObject(Base):
+    __tablename__ = "storage_migration_objects"
+    __table_args__ = (UniqueConstraint("migration_id", "document_id", name="uq_storage_migration_document"),)
+
+    id = Column(Integer, primary_key=True)
+    migration_id = Column(Integer, ForeignKey("storage_migrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    source_profile_id = Column(Integer, nullable=False)
+    destination_profile_id = Column(Integer, nullable=False)
+    source_key = Column(String(512), nullable=False)
+    destination_key = Column(String(512), nullable=False)
+    byte_length = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    state = Column(String(20), nullable=False, default="pending", index=True)
+    error = Column(Text, nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class StorageCleanup(Base):
+    __tablename__ = "storage_cleanups"
+    __table_args__ = (UniqueConstraint("storage_profile_id", "object_key", name="uq_storage_cleanup_object"),)
+
+    id = Column(Integer, primary_key=True)
+    storage_profile_id = Column(Integer, ForeignKey("storage_profiles.id"), nullable=False, index=True)
+    object_key = Column(String(512), nullable=False)
+    state = Column(String(20), nullable=False, default="pending", index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
 
 class MaintenanceReminder(Base):

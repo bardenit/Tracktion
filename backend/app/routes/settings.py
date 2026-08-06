@@ -3,7 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import create_engine, text
 from app.auth import get_current_user
 from app.deps import require_admin
-from app.models import User
+from app.models import User, StorageProfile
+from app.database import get_db
+from sqlalchemy.orm import Session
 from app.data_config import get_config, save_config, get_database_url
 from app.schemas import (
     DBSettings, DBSettingsResponse,
@@ -73,7 +75,7 @@ def test_db_connection(s: DBSettings, current_user: User = Depends(get_current_u
         engine.dispose()
         return {"success": True}
     except Exception:
-        logging.exception("DB connection test failed")
+        logging.warning("DB connection test failed")
         return {"success": False, "error": "Connection failed. Check your settings."}
 
 
@@ -87,7 +89,7 @@ def save_db_settings(s: DBSettings, current_user: User = Depends(get_current_use
             conn.execute(text("SELECT 1"))
         engine.dispose()
     except Exception:
-        logging.exception("DB connection test failed during save")
+        logging.warning("DB connection test failed during save")
         raise HTTPException(status_code=400, detail="Connection test failed. Check your settings.")
     config = get_config()
     config["database"] = {"type": s.type, "url": url, "host": s.host, "port": s.port, "database": s.database, "username": s.username}
@@ -98,72 +100,108 @@ def save_db_settings(s: DBSettings, current_user: User = Depends(get_current_use
 # ── Storage ───────────────────────────────────────────────────────────────────
 
 @router.get("/storage", response_model=StorageSettingsResponse)
-def get_storage_settings(current_user: User = Depends(get_current_user)):
-    cfg = get_config().get("storage", {})
+def get_storage_settings(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    profile = db.query(StorageProfile).filter_by(is_active=True).first()
+    cfg = dict(profile.configuration or {}) if profile else get_config().get("storage", {})
+    storage_type = profile.backend_type if profile else cfg.get("type", "local")
     return StorageSettingsResponse(
-        type=cfg.get("type", "local"),
+        type=storage_type,
         endpoint=cfg.get("endpoint"),
         bucket=cfg.get("bucket"),
         region=cfg.get("region"),
-        access_key=cfg.get("access_key"),
+        access_key=None,
         url=cfg.get("url"),
         username=cfg.get("username"),
         path=cfg.get("path"),
         has_secret=bool(cfg.get("secret_key") or cfg.get("password")),
+        has_access_key=bool(cfg.get("access_key")),
     )
 
 
+def _storage_configuration(s: StorageSettings, existing: dict | None = None) -> dict:
+    existing = existing or {}
+    entry: dict = {"type": s.type}
+    if s.type == "s3":
+        entry.update(endpoint=s.endpoint or "", bucket=s.bucket or "", region=s.region or "us-east-1",
+                     access_key=s.access_key or existing.get("access_key", ""),
+                     secret_key=s.secret_key or existing.get("secret_key", ""))
+    elif s.type == "webdav":
+        entry.update(url=s.url or "", username=s.username or existing.get("username", ""),
+                     password=s.password or existing.get("password", ""), path=s.path or "/tracktion")
+    return entry
+
+
 @router.post("/storage/test")
-def test_storage_connection(s: StorageSettings, current_user: User = Depends(get_current_user)):
+def test_storage_connection(s: StorageSettings, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        _build_storage(s).test()
+        active = db.query(StorageProfile).filter_by(is_active=True).first()
+        existing = dict(active.configuration or {}) if active and active.backend_type == s.type else {}
+        _build_storage_config(_storage_configuration(s, existing)).test()
         return {"success": True}
     except Exception:
-        logging.exception("Storage connection test failed")
+        logging.warning("Storage connection test failed")
         return {"success": False, "error": "Connection failed. Check your settings."}
 
 
-@router.post("/storage")
-def save_storage_settings(s: StorageSettings, current_user: User = Depends(get_current_user)):
-    if s.type != "local":
-        try:
-            _build_storage(s).test()
-        except Exception:
-            logging.exception("Storage connection test failed during save")
-            raise HTTPException(status_code=400, detail="Connection test failed. Check your settings.")
+@router.post("/storage/migrations")
+def create_storage_migration(s: StorageSettings, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.storage_migration import create_migration
+    active = db.query(StorageProfile).filter_by(is_active=True).first()
+    existing = dict(active.configuration or {}) if active and active.backend_type == s.type else {}
+    entry = _storage_configuration(s, existing)
+    try:
+        _build_storage_config(entry).test()
+        migration = create_migration(db, entry)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception:
+        logging.warning("Storage migration creation failed")
+        raise HTTPException(status_code=400, detail="Storage candidate could not be prepared")
+    return {"id": migration.id, "state": migration.state}
 
-    config = get_config()
-    existing = config.get("storage", {})
 
-    entry: dict = {"type": s.type}
-    if s.type == "s3":
-        entry["endpoint"] = s.endpoint or ""
-        entry["bucket"] = s.bucket or ""
-        entry["region"] = s.region or "us-east-1"
-        entry["access_key"] = s.access_key or ""
-        entry["secret_key"] = s.secret_key or existing.get("secret_key", "")
-    elif s.type == "webdav":
-        entry["url"] = s.url or ""
-        entry["username"] = s.username or ""
-        entry["password"] = s.password or existing.get("password", "")
-        entry["path"] = s.path or "/tracktion"
+@router.post("/storage/migrations/{migration_id}/start")
+@router.post("/storage/migrations/{migration_id}/resume")
+def start_storage_migration(migration_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.storage_migration import run_migration, migration_status
+    try:
+        run_migration(db, migration_id)
+        return migration_status(db, migration_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
-    config["storage"] = entry
-    save_config(config)
-    return {"message": "Storage settings saved. New uploads will use the updated backend immediately."}
+
+@router.get("/storage/migrations/{migration_id}")
+def get_storage_migration(migration_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.storage_migration import migration_status
+    try:
+        return migration_status(db, migration_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/storage/migrations/{migration_id}/cancel")
+def cancel_storage_migration_route(migration_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.storage_migration import cancel_migration, migration_status
+    try:
+        cancel_migration(db, migration_id)
+        return migration_status(db, migration_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post("/storage/buckets")
-def list_storage_buckets(s: StorageSettings, current_user: User = Depends(get_current_user)):
+def list_storage_buckets(s: StorageSettings, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if s.type != "s3":
         raise HTTPException(status_code=400, detail="Bucket listing is only supported for S3-compatible storage")
     try:
         import boto3
         from botocore.config import Config
-        stored_secret = get_config().get("storage", {}).get("secret_key", "")
+        active = db.query(StorageProfile).filter_by(is_active=True).first()
+        stored = dict(active.configuration or {}) if active and active.backend_type == "s3" else {}
         kwargs: dict = {
-            "aws_access_key_id": s.access_key,
-            "aws_secret_access_key": s.secret_key or stored_secret,
+            "aws_access_key_id": s.access_key or stored.get("access_key"),
+            "aws_secret_access_key": s.secret_key or stored.get("secret_key", ""),
             "region_name": s.region or "us-east-1",
             "config": Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         }
@@ -173,20 +211,17 @@ def list_storage_buckets(s: StorageSettings, current_user: User = Depends(get_cu
         response = client.list_buckets()
         return {"buckets": [b["Name"] for b in response.get("Buckets", [])]}
     except Exception:
-        logging.exception("Storage bucket listing failed")
+        logging.warning("Storage bucket listing failed")
         raise HTTPException(status_code=400, detail="Could not list buckets. Check your credentials and settings.")
 
 
 def _build_storage(s: StorageSettings):
-    from app.storage import LocalStorage, S3Storage, WebDAVStorage
-    if s.type == "s3":
-        return S3Storage({
-            "endpoint": s.endpoint, "bucket": s.bucket, "region": s.region,
-            "access_key": s.access_key, "secret_key": s.secret_key,
-        })
-    if s.type == "webdav":
-        return WebDAVStorage({"url": s.url, "username": s.username, "password": s.password, "path": s.path})
-    return LocalStorage()
+    return _build_storage_config(_storage_configuration(s))
+
+
+def _build_storage_config(configuration: dict):
+    from app.storage import storage_from_config
+    return storage_from_config(configuration)
 
 
 # ── Integrations ──────────────────────────────────────────────────────────────
@@ -215,8 +250,9 @@ def test_integrations(s: IntegrationsSettings = IntegrationsSettings(), current_
             messages=[{"role": "user", "content": "Hi"}],
         )
         return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logging.warning("Integration connection test failed")
+        return {"success": False, "error": "Connection failed. Check your API key and settings."}
 
 
 @router.post("/integrations")

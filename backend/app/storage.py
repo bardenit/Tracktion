@@ -1,7 +1,26 @@
 import os
 import tempfile
+import uuid
 from abc import ABC, abstractmethod
 from app.data_config import get_config, DATA_DIR
+
+
+def new_object_key(user_id: int, vehicle_id: int) -> str:
+    """Return a Tracktion-owned immutable key; user filenames never influence it."""
+    return f"tracktion/objects/{uuid.uuid4()}"
+
+
+def get_active_profile(db):
+    from app.models import StorageProfile
+    profile = db.query(StorageProfile).filter_by(is_active=True).first()
+    if profile:
+        return profile
+    cfg = dict(get_config().get('storage', {}))
+    profile = StorageProfile(profile_uuid=str(uuid.uuid4()), backend_type=cfg.get('type', 'local'),
+                             configuration=cfg, credential_version=1, is_active=True)
+    db.add(profile)
+    db.flush()
+    return profile
 
 
 class StorageBackend(ABC):
@@ -129,11 +148,27 @@ class WebDAVStorage(StorageBackend):
         self.client.check(self.base or '/')
 
 
-def get_storage() -> StorageBackend:
-    cfg = get_config().get('storage', {})
+def storage_from_config(cfg: dict) -> StorageBackend:
     t = cfg.get('type', 'local')
     if t == 's3':
         return S3Storage(cfg)
     if t == 'webdav':
         return WebDAVStorage(cfg)
     return LocalStorage()
+
+
+def get_storage(profile=None) -> StorageBackend:
+    """Build storage from an immutable profile, falling back for legacy callers."""
+    if profile is None:
+        return storage_from_config(get_config().get('storage', {}))
+    cfg = dict(profile.configuration or {})
+    cfg['type'] = profile.backend_type
+    return storage_from_config(cfg)
+
+
+def get_storage_for_profile(db, profile_id: int) -> StorageBackend:
+    from app.models import StorageProfile
+    profile = db.get(StorageProfile, profile_id)
+    if not profile:
+        raise ValueError(f"Storage profile {profile_id} does not exist")
+    return get_storage(profile)

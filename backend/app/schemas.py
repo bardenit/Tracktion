@@ -124,6 +124,7 @@ class VehicleResponse(BaseModel):
     tank_size_gallons: Optional[float] = None
     nhtsa_data: Optional[dict] = None
     specs_overrides: Optional[dict] = None
+    primary_photo_id: Optional[int] = None
     created_at: datetime
 
     class Config:
@@ -441,6 +442,7 @@ class StorageSettingsResponse(BaseModel):
     username: Optional[str] = None
     path: Optional[str] = None
     has_secret: bool = False
+    has_access_key: bool = False
 
 
 class IntegrationsSettings(BaseModel):

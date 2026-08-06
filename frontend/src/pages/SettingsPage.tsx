@@ -54,6 +54,7 @@ export default function SettingsPage() {
   const [storageBanner, setStorageBanner] = useState<string | null>(null);
   const [storageLoading, setStorageLoading] = useState(false);
   const [storageStatus, setStorageStatus] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
+  const [storageMigration, setStorageMigration] = useState<{ id: number; state: string; total?: number; verified?: number } | null>(null);
 
   // ── Integrations ──────────────────────────────────────────────────────────
   const [anthropicKey, setAnthropicKey] = useState('');
@@ -79,7 +80,7 @@ export default function SettingsPage() {
         setS3Endpoint(s.endpoint || '');
         setS3Bucket(s.bucket || '');
         setS3Region(s.region || '');
-        setS3AccessKey(s.access_key || '');
+        setS3AccessKey('');
         setWdUrl(s.url || '');
         setWdUsername(s.username || '');
         setWdPath(s.path || '/tracktion');
@@ -186,10 +187,13 @@ export default function SettingsPage() {
   const handleSaveStorage = async () => {
     setStorageLoading(true); setStorageStatus(null);
     try {
-      const r = await apiClient.saveStorageSettings(buildStoragePayload());
-      setStorageStatus({ type: 'info', msg: r.message });
+      const created = await apiClient.saveStorageSettings(buildStoragePayload());
+      setStorageMigration(created);
+      const r = await apiClient.startStorageMigration(created.id);
+      setStorageMigration(r);
+      setStorageStatus({ type: r.state === 'complete' ? 'success' : 'info', msg: `Storage migration ${r.state}` });
       setS3SecretKey(''); setWdPassword('');
-      addToast('success', 'Storage settings saved');
+      if (r.state === 'complete') addToast('success', 'Storage migration complete');
       if (storageType === 'local') setStorageBanner('Local filesystem');
       else if (storageType === 's3') {
         const ep = (s3Endpoint || 'AWS S3').replace('https://', '');
@@ -199,6 +203,37 @@ export default function SettingsPage() {
       }
     } catch (err: any) { setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Save failed' }); }
     finally { setStorageLoading(false); }
+  };
+
+  const handleResumeStorage = async () => {
+    if (!storageMigration) return;
+    setStorageLoading(true);
+    try {
+      const r = await apiClient.resumeStorageMigration(storageMigration.id);
+      setStorageMigration(r);
+      setStorageStatus({ type: r.state === 'complete' ? 'success' : 'info', msg: `Storage migration ${r.state}` });
+    } catch (err: any) { setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Resume failed' }); }
+    finally { setStorageLoading(false); }
+  };
+
+  const handleCancelStorage = async () => {
+    if (!storageMigration) return;
+    setStorageLoading(true);
+    try {
+      const r = await apiClient.cancelStorageMigration(storageMigration.id);
+      setStorageMigration(r);
+      setStorageStatus({ type: 'info', msg: 'Storage migration cancelled' });
+    } catch (err: any) { setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Cancel failed' }); }
+    finally { setStorageLoading(false); }
+  };
+
+  const handleRefreshStorage = async () => {
+    if (!storageMigration) return;
+    try {
+      const r = await apiClient.getStorageMigration(storageMigration.id);
+      setStorageMigration(r);
+      setStorageStatus({ type: r.state === 'complete' ? 'success' : 'info', msg: `Storage migration ${r.state}` });
+    } catch (err: any) { setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Status check failed' }); }
   };
 
   const handleTestIntegrations = async () => {
@@ -531,6 +566,17 @@ export default function SettingsPage() {
             <div className={`p-3 rounded text-sm ${statusCls(storageStatus.type)}`}>{storageStatus.msg}</div>
           )}
 
+          {storageMigration && storageMigration.state !== 'complete' && storageMigration.state !== 'cancelled' && (
+            <div className="flex items-center justify-between gap-3 rounded bg-slate-700/50 p-3 text-sm">
+              <span className="text-slate-300">Migration #{storageMigration.id}: {storageMigration.state}</span>
+              <div className="flex gap-2">
+                <button onClick={handleRefreshStorage} className="btn-secondary">Status</button>
+                {storageMigration.state === 'failed' && <button onClick={handleResumeStorage} className="btn-secondary">Resume</button>}
+                <button onClick={handleCancelStorage} className="btn-secondary">Cancel</button>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3">
             {storageType !== 'local' && (
               <button onClick={handleTestStorage} disabled={storageLoading} className="btn-secondary flex-1">
@@ -538,7 +584,7 @@ export default function SettingsPage() {
               </button>
             )}
             <button onClick={handleSaveStorage} disabled={storageLoading} className="btn-primary flex-1">
-              {storageLoading ? 'Saving...' : 'Save'}
+              {storageLoading ? 'Migrating...' : 'Migrate & Activate'}
             </button>
           </div>
         </div>

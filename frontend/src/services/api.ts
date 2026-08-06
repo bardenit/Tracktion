@@ -368,7 +368,27 @@ class ApiClient {
   }
 
   async saveStorageSettings(settings: any) {
-    const response = await this.client.post('/settings/storage', settings);
+    const response = await this.client.post('/settings/storage/migrations', settings);
+    return response.data;
+  }
+
+  async startStorageMigration(id: number) {
+    const response = await this.client.post(`/settings/storage/migrations/${id}/start`);
+    return response.data;
+  }
+
+  async getStorageMigration(id: number) {
+    const response = await this.client.get(`/settings/storage/migrations/${id}`);
+    return response.data;
+  }
+
+  async resumeStorageMigration(id: number) {
+    const response = await this.client.post(`/settings/storage/migrations/${id}/resume`);
+    return response.data;
+  }
+
+  async cancelStorageMigration(id: number) {
+    const response = await this.client.post(`/settings/storage/migrations/${id}/cancel`);
     return response.data;
   }
 

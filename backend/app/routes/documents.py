@@ -1,17 +1,19 @@
 import io
 import os
-from datetime import datetime, timezone
+import re
+import hashlib
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, Document
+from app.models import User, Vehicle, Document, MaintenanceEntry
 from app.schemas import DocumentResponse, VehiclePhotoResponse
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
-from app.storage import get_storage
+from app.storage import get_storage, get_storage_for_profile, get_active_profile, new_object_key
+from app.services.storage_cleanup import schedule_cleanup
 
 router = APIRouter()
 
@@ -29,6 +31,7 @@ ALLOWED_TYPES = {
 }
 
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 def _media_type(filename: str) -> str:
@@ -47,8 +50,43 @@ def _media_type(filename: str) -> str:
 
 
 def _safe_filename(filename: str | None, fallback: str = 'file') -> str:
-    name = os.path.basename(filename or fallback).replace(" ", "_") or fallback
-    return name or fallback
+    name = os.path.basename((filename or fallback).replace("\\", "/"))
+    name = re.sub(r"[\x00-\x1f\x7f:]", "", name).replace(" ", "_")
+    return name[:255] or fallback
+
+
+def detect_content_type(data: bytes, claimed: str | None) -> str:
+    signatures = ((b"%PDF-", "application/pdf"), (b"\xff\xd8\xff", "image/jpeg"),
+                  (b"\x89PNG\r\n\x1a\n", "image/png"), (b"RIFF", "image/webp"),
+                  (b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                  (b"\xd0\xcf\x11\xe0", "application/msword"))
+    for signature, media_type in signatures:
+        if data.startswith(signature):
+            if media_type == "image/webp" and data[8:12] != b"WEBP":
+                break
+            return media_type
+    if len(data) >= 12 and data[4:12] in {b"ftypheic", b"ftypheix", b"ftyphevc", b"ftyphevx", b"ftypmif1"}:
+        return "image/heic"
+    raise ValueError("File content does not match a supported type")
+
+
+async def _read_limited(file: UploadFile) -> bytes:
+    chunks, size = [], 0
+    while chunk := await file.read(64 * 1024):
+        size += len(chunk)
+        if size > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="File too large. Maximum size is 20MB")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _photo_successor(db: Session, vehicle_id: int, excluding_id: int) -> Document | None:
+    return (
+        db.query(Document)
+        .filter(Document.vehicle_id == vehicle_id, Document.document_type == "vehicle_photo", Document.id != excluding_id)
+        .order_by(Document.uploaded_at.asc(), Document.id.asc())
+        .first()
+    )
 
 
 @router.post("/{vehicle_id}/documents", response_model=DocumentResponse)
@@ -65,29 +103,44 @@ async def upload_document(
     if document_type not in VALID_DOC_TYPES:
         raise HTTPException(status_code=400, detail="Invalid document type")
 
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail="File type not allowed. Allowed: PDF, Images, Word docs")
-
-    data = await file.read()
-    if len(data) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 20MB")
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if maintenance_entry_id is not None and not db.query(MaintenanceEntry.id).filter_by(
+        id=maintenance_entry_id, vehicle_id=vehicle_id
+    ).first():
+        raise HTTPException(status_code=400, detail="Maintenance entry does not belong to this vehicle")
+    data = await _read_limited(file)
+    try:
+        content_type = detect_content_type(data, file.content_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     safe_name = _safe_filename(file.filename)
-    relative_path = f"user_{current_user.id}/vehicle_{vehicle_id}/{timestamp}_{safe_name}"
-
-    get_storage().save(data, relative_path, file.content_type or 'application/octet-stream')
+    relative_path = new_object_key(current_user.id, vehicle_id)
+    profile = get_active_profile(db)
+    storage = get_storage(profile)
+    storage.save(data, relative_path, content_type)
 
     doc = Document(
         vehicle_id=vehicle_id,
         maintenance_entry_id=maintenance_entry_id,
         filename=safe_name,
         storage_path=relative_path,
+        storage_profile_id=profile.id,
+        content_type=content_type,
+        byte_length=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
         document_type=document_type,
         ocr_text=None,
     )
     db.add(doc)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        try:
+            storage.delete(relative_path)
+        except Exception:
+            cleanup = schedule_cleanup(db, profile.id, relative_path)
+            db.commit()
+        raise
     db.refresh(doc)
     return doc
 
@@ -120,7 +173,7 @@ def download_document(
         raise HTTPException(status_code=404, detail="Document not found")
 
     try:
-        content = get_storage().load(doc.storage_path)
+        content = get_storage_for_profile(db, doc.storage_profile_id).load(doc.storage_path)
     except Exception:
         raise HTTPException(status_code=404, detail="File not found in storage")
 
@@ -130,7 +183,8 @@ def download_document(
     return StreamingResponse(
         io.BytesIO(content),
         media_type=media_type,
-        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_name}"},
+        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_name}",
+                 "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -145,9 +199,14 @@ def delete_document(
     doc = db.query(Document).filter(Document.id == document_id, Document.vehicle_id == vehicle_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    get_storage().delete(doc.storage_path)
+    profile_id, object_key = doc.storage_profile_id, doc.storage_path
     db.delete(doc)
+    if profile_id:
+        cleanup = schedule_cleanup(db, profile_id, object_key)
     db.commit()
+    if profile_id:
+        from app.services.storage_cleanup import run_cleanup
+        run_cleanup(db, cleanup.id)
     return {"message": "Document deleted"}
 
 
@@ -165,23 +224,44 @@ async def upload_vehicle_photo(
     if file.content_type not in IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Image files only (JPEG, PNG, WebP)")
 
-    data = await file.read()
-    if len(data) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 20 MB)")
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    data = await _read_limited(file)
+    try:
+        content_type = detect_content_type(data, file.content_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if content_type not in IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Image files only (JPEG, PNG, WebP, HEIC)")
     safe_name = _safe_filename(file.filename, 'photo')
-    relative_path = f"user_{current_user.id}/vehicle_{vehicle_id}/photo_{timestamp}_{safe_name}"
-    get_storage().save(data, relative_path, file.content_type or 'image/jpeg')
+    relative_path = new_object_key(current_user.id, vehicle_id)
+    profile = get_active_profile(db)
+    storage = get_storage(profile)
+    storage.save(data, relative_path, content_type)
 
     doc = Document(
         vehicle_id=vehicle_id,
         filename=safe_name,
         storage_path=relative_path,
+        storage_profile_id=profile.id,
+        content_type=content_type,
+        byte_length=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
         document_type='vehicle_photo',
     )
     db.add(doc)
-    db.commit()
+    try:
+        db.flush()
+        vehicle = db.get(Vehicle, vehicle_id)
+        if vehicle.primary_photo_id is None:
+            vehicle.primary_photo_id = doc.id
+        db.commit()
+    except Exception:
+        db.rollback()
+        try:
+            storage.delete(relative_path)
+        except Exception:
+            schedule_cleanup(db, profile.id, relative_path)
+            db.commit()
+        raise
     db.refresh(doc)
     return {"id": doc.id, "filename": doc.filename}
 
@@ -216,12 +296,18 @@ def delete_vehicle_photo_by_id(
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Photo not found")
-    try:
-        get_storage().delete(doc.storage_path)
-    except Exception:
-        pass
+    vehicle = db.get(Vehicle, vehicle_id)
+    profile_id, object_key = doc.storage_profile_id, doc.storage_path
+    if vehicle.primary_photo_id == doc.id:
+        successor = _photo_successor(db, vehicle_id, doc.id)
+        vehicle.primary_photo_id = successor.id if successor else None
     db.delete(doc)
+    if profile_id:
+        cleanup = schedule_cleanup(db, profile_id, object_key)
     db.commit()
+    if profile_id:
+        from app.services.storage_cleanup import run_cleanup
+        run_cleanup(db, cleanup.id)
     return {"message": "Photo deleted"}
 
 
@@ -232,22 +318,20 @@ def get_vehicle_photo(
     db: Session = Depends(get_db),
 ):
     check_vehicle_access(vehicle_id, current_user.id, db)
-    doc = (
-        db.query(Document)
-        .filter(Document.vehicle_id == vehicle_id, Document.document_type == 'vehicle_photo')
-        .first()
-    )
+    vehicle = db.get(Vehicle, vehicle_id)
+    doc = db.get(Document, vehicle.primary_photo_id) if vehicle.primary_photo_id else None
     if not doc:
         raise HTTPException(status_code=404, detail="No photo")
     try:
-        content = get_storage().load(doc.storage_path)
+        content = get_storage_for_profile(db, doc.storage_profile_id).load(doc.storage_path)
     except Exception:
         raise HTTPException(status_code=404, detail="Photo not found in storage")
     media_type = _media_type(doc.filename or '')
     return StreamingResponse(
         io.BytesIO(content),
         media_type=media_type,
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(doc.filename or 'photo', safe='')}"},
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(doc.filename or 'photo', safe='')}",
+                 "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -258,17 +342,18 @@ def delete_vehicle_photo(
     db: Session = Depends(get_db),
 ):
     check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
-    doc = (
-        db.query(Document)
-        .filter(Document.vehicle_id == vehicle_id, Document.document_type == 'vehicle_photo')
-        .first()
-    )
+    vehicle = db.get(Vehicle, vehicle_id)
+    doc = db.get(Document, vehicle.primary_photo_id) if vehicle.primary_photo_id else None
     if not doc:
         raise HTTPException(status_code=404, detail="No photo")
-    try:
-        get_storage().delete(doc.storage_path)
-    except Exception:
-        pass
+    profile_id, object_key = doc.storage_profile_id, doc.storage_path
+    successor = _photo_successor(db, vehicle_id, doc.id)
+    vehicle.primary_photo_id = successor.id if successor else None
     db.delete(doc)
+    if profile_id:
+        cleanup = schedule_cleanup(db, profile_id, object_key)
     db.commit()
+    if profile_id:
+        from app.services.storage_cleanup import run_cleanup
+        run_cleanup(db, cleanup.id)
     return {"message": "Photo deleted"}
