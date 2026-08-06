@@ -21,21 +21,26 @@ def recompute_reminders(db: Session, vehicle_id: int, service_types: Iterable[st
         .with_for_update()
         .all()
     )
+    ordered_entries = (
+        db.query(MaintenanceEntry)
+        .filter(
+            MaintenanceEntry.vehicle_id == vehicle_id,
+            MaintenanceEntry.type.in_(names),
+        )
+        .order_by(
+            MaintenanceEntry.type,
+            MaintenanceEntry.date.desc(),
+            MaintenanceEntry.mileage.desc(),
+            MaintenanceEntry.id.desc(),
+        )
+        .all()
+    )
+    latest_by_type = {}
+    for entry in ordered_entries:
+        latest_by_type.setdefault(entry.type, entry)
     today = date.today()
     for reminder in reminders:
-        latest = (
-            db.query(MaintenanceEntry)
-            .filter(
-                MaintenanceEntry.vehicle_id == vehicle_id,
-                MaintenanceEntry.type == reminder.service_type,
-            )
-            .order_by(
-                MaintenanceEntry.date.desc(),
-                MaintenanceEntry.mileage.desc(),
-                MaintenanceEntry.id.desc(),
-            )
-            .first()
-        )
+        latest = latest_by_type.get(reminder.service_type)
         reminder.last_performed_mileage = latest.mileage if latest else None
         reminder.last_performed_date = latest.date if latest else None
         reminder.next_due_mileage = (

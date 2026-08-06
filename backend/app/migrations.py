@@ -9,7 +9,7 @@ from app.data_config import get_database_url
 from app.schema_bootstrap import reconcile_legacy_schema
 
 
-HEAD_REVISION = "0007_bulk_import_operations"
+HEAD_REVISION = "0008_installation_state"
 
 
 def alembic_config(database_url: str) -> Config:

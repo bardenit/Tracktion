@@ -12,7 +12,7 @@ def new_object_key(user_id: int, vehicle_id: int) -> str:
 
 def get_active_profile(db):
     from app.models import StorageProfile
-    profile = db.query(StorageProfile).filter_by(is_active=True).first()
+    profile = db.query(StorageProfile).filter_by(is_active=True).with_for_update().first()
     if profile:
         return profile
     cfg = dict(get_config().get('storage', {}))
@@ -139,10 +139,7 @@ class WebDAVStorage(StorageBackend):
 
     def delete(self, path: str) -> None:
         remote = f"{self.base}/{path}"
-        try:
-            self.client.clean(remote)
-        except Exception:
-            pass
+        self.client.clean(remote)
 
     def test(self) -> None:
         self.client.check(self.base or '/')

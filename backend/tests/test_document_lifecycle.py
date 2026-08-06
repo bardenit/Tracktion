@@ -15,8 +15,8 @@ def test_content_detection_ignores_spoofed_header():
     from app.routes.documents import detect_content_type
 
     with pytest.raises(ValueError):
-        detect_content_type(b"not a pdf", "application/pdf")
-    assert detect_content_type(b"%PDF-1.7\n", "application/pdf") == "application/pdf"
+        detect_content_type(b"not a pdf")
+    assert detect_content_type(b"%PDF-1.7\n") == "application/pdf"
 
 
 def test_filename_removes_header_and_path_characters():

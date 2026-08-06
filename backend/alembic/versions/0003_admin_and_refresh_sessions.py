@@ -20,10 +20,15 @@ def upgrade():
     user_columns = {column["name"] for column in inspector.get_columns("users")}
     if "is_admin" not in user_columns:
         op.add_column("users", sa.Column("is_admin", sa.Boolean(), server_default=sa.false(), nullable=False))
-    op.execute(
-        "UPDATE users SET is_admin = true WHERE id = "
-        "(SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1)"
-    )
+    bind = op.get_bind()
+    first_user_id = bind.execute(
+        sa.text("SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1")
+    ).scalar()
+    if first_user_id is not None:
+        bind.execute(
+            sa.text("UPDATE users SET is_admin = :is_admin WHERE id = :user_id"),
+            {"is_admin": True, "user_id": first_user_id},
+        )
     if "refresh_sessions" not in inspector.get_table_names():
         op.create_table(
             "refresh_sessions",

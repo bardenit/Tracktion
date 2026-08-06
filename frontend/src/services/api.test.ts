@@ -42,6 +42,25 @@ describe('apiClient test isolation', () => {
     expect(results).toHaveLength(20)
   })
 
+  it('does not restore tokens when logout happens during refresh', async () => {
+    localStorage.setItem('accessToken', 'expired')
+    localStorage.setItem('refreshToken', 'refresh')
+    let resolveRefresh!: (value: unknown) => void
+    refreshPost.mockImplementation((path: string) => path === '/auth/refresh'
+      ? new Promise((resolve) => { resolveRefresh = resolve })
+      : Promise.resolve({ data: {} }))
+    const { apiClient } = await import('./api')
+    const rejected = responseUse.mock.calls[0][1]
+    const request = rejected({ response: { status: 401 }, config: { headers: {} } })
+
+    apiClient.logout()
+    resolveRefresh({ data: { access_token: 'stale-access', refresh_token: 'stale-refresh' } })
+
+    await expect(request).rejects.toThrow('Authentication changed during refresh')
+    expect(localStorage.getItem('accessToken')).toBeNull()
+    expect(localStorage.getItem('refreshToken')).toBeNull()
+  })
+
   it('clears authentication tokens and invokes logout notification', async () => {
     localStorage.setItem('accessToken', 'access')
     localStorage.setItem('refreshToken', 'refresh')
@@ -84,6 +103,25 @@ describe('apiClient test isolation', () => {
     expect(result).toEqual({ synced: 0, conflicts: 1, remaining: 2 })
     expect(apiClient.getOfflineFuelQueue().map((item) => item.status)).toEqual(['pending', 'conflict'])
     expect(apiClient.getOfflineFuelQueue()[1].conflictReason).toContain('bad mileage')
+  })
+
+  it('stops an offline sync when the authenticated user changes', async () => {
+    const { apiClient } = await import('./api')
+    apiClient.setAuthenticatedUser(1)
+    apiClient.queueFuelEntry(3, { date: '2026-08-01', mileage: 10, gallons: 1, cost: 4 })
+    apiClient.queueFuelEntry(3, { date: '2026-08-02', mileage: 20, gallons: 1, cost: 4 })
+    const queueKey = 'tracktion-offline-fuel:v2:user:1'
+    const originalQueue = localStorage.getItem(queueKey)
+    let resolveCreate!: (value: unknown) => void
+    axiosClient.post.mockImplementation(() => new Promise((resolve) => { resolveCreate = resolve }))
+
+    const sync = apiClient.syncOfflineFuelEntries()
+    apiClient.setAuthenticatedUser(2)
+    resolveCreate({ data: {} })
+    await sync
+
+    expect(axiosClient.post).toHaveBeenCalledOnce()
+    expect(localStorage.getItem(queueKey)).toBe(originalQueue)
   })
 
   it('coalesces duplicate deletes while a request is pending', async () => {

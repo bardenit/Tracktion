@@ -79,6 +79,8 @@ class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private refreshPromise: Promise<string> | null = null;
+  private offlineSync: { userId: number; promise: Promise<{ synced: number; conflicts: number; remaining: number }> } | null = null;
+  private authGeneration = 0;
   private onLogoutCallback: (() => void) | null = null;
   private authenticatedUserId: number | null = null;
   private pendingDeletes = new Map<string, Promise<unknown>>();
@@ -96,6 +98,7 @@ class ApiClient {
   }
 
   setAuthenticatedUser(userId: number | null) {
+    if (this.authenticatedUserId !== userId) this.authGeneration++;
     this.authenticatedUserId = userId;
     const legacy = localStorage.getItem(LEGACY_OFFLINE_FUEL_KEY);
     if (legacy !== null) {
@@ -134,12 +137,14 @@ class ApiClient {
         if (error.response?.status === 401 && this.refreshToken && !error.config?._retry) {
           const originalConfig = error.config;
           originalConfig._retry = true;
+          const generation = this.authGeneration;
           try {
             const token = await this.getSharedRefresh();
+            if (generation !== this.authGeneration) throw new Error('Authentication changed during refresh');
             originalConfig.headers.Authorization = `Bearer ${token}`;
             return this.client(originalConfig);
           } catch (refreshError) {
-            this.logout();
+            if (generation === this.authGeneration) this.logout();
             return Promise.reject(refreshError);
           }
         }
@@ -165,7 +170,9 @@ class ApiClient {
   }
 
   async login(email: string, password: string) {
+    const generation = ++this.authGeneration;
     const response = await this.client.post('/auth/login', { email, password });
+    if (generation !== this.authGeneration) throw new Error('Authentication changed during login');
     this.accessToken = response.data.access_token;
     this.refreshToken = response.data.refresh_token;
     this.saveTokens();
@@ -180,8 +187,10 @@ class ApiClient {
 
   private getSharedRefresh(): Promise<string> {
     if (!this.refreshPromise) {
+      const generation = this.authGeneration;
       this.refreshPromise = this.refreshAccessToken()
         .then((response) => {
+          if (generation !== this.authGeneration) throw new Error('Authentication changed during refresh');
           this.accessToken = response.access_token;
           this.refreshToken = response.refresh_token;
           this.saveTokens();
@@ -198,6 +207,7 @@ class ApiClient {
   }
 
   logout() {
+    this.authGeneration++;
     const refreshToken = this.refreshToken;
     if (refreshToken) {
       void this.refreshClient.post('/auth/logout', { refresh_token: refreshToken }).catch(() => undefined);
@@ -498,19 +508,38 @@ class ApiClient {
     }
   }
 
-  queueFuelEntry(vehicleId: number, payload: any) {
+  queueFuelEntry(vehicleId: number, payload: any, operationId = crypto.randomUUID()) {
     const key = this.offlineFuelKey();
     if (!key) throw new Error('Authentication must resolve before queueing offline fuel');
     const queue = this.getOfflineFuelQueue();
-    const operationId = crypto.randomUUID();
     queue.push({ operationId, vehicleId, payload: { ...payload }, queuedAt: new Date().toISOString(), status: 'pending' });
     localStorage.setItem(key, JSON.stringify(queue));
   }
 
-  async syncOfflineFuelEntries(): Promise<{ synced: number; conflicts: number; remaining: number }> {
-    const key = this.offlineFuelKey();
-    if (!key) return { synced: 0, conflicts: 0, remaining: 0 };
-    const queue = this.getOfflineFuelQueue();
+  syncOfflineFuelEntries(): Promise<{ synced: number; conflicts: number; remaining: number }> {
+    const userId = this.authenticatedUserId;
+    if (userId === null) return Promise.resolve({ synced: 0, conflicts: 0, remaining: 0 });
+    if (!this.offlineSync || this.offlineSync.userId !== userId) {
+      const generation = this.authGeneration;
+      const promise = this.performOfflineFuelSync(userId, generation)
+        .finally(() => {
+          if (this.offlineSync?.promise === promise) this.offlineSync = null;
+        });
+      this.offlineSync = { userId, promise };
+    }
+    return this.offlineSync.promise;
+  }
+
+  private async performOfflineFuelSync(userId: number, generation: number): Promise<{ synced: number; conflicts: number; remaining: number }> {
+    const key = `tracktion-offline-fuel:v${OFFLINE_FUEL_VERSION}:user:${userId}`;
+    const isCurrent = () => this.authenticatedUserId === userId && this.authGeneration === generation;
+    let queue: OfflineFuelQueueItem[];
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+      queue = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      queue = [];
+    }
     if (queue.length === 0) return { synced: 0, conflicts: 0, remaining: 0 };
 
     // Oldest fill-up first so server-side mileage validation sees them in order
@@ -521,6 +550,7 @@ class ApiClient {
     let conflicts = 0;
     const remaining: typeof queue = [];
     for (const item of queue) {
+      if (!isCurrent()) return { synced, conflicts, remaining: queue.length - synced };
       if (item.status === 'conflict') {
         conflicts++;
         remaining.push(item);
@@ -541,7 +571,7 @@ class ApiClient {
         remaining.push(item);
       }
     }
-    localStorage.setItem(key, JSON.stringify(remaining));
+    if (isCurrent()) localStorage.setItem(key, JSON.stringify(remaining));
     return { synced, conflicts, remaining: remaining.length };
   }
 

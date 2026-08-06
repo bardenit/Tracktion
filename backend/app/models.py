@@ -6,6 +6,13 @@ from app.database import Base
 import enum
 
 
+class InstallationState(Base):
+    __tablename__ = "installation_state"
+
+    id = Column(Integer, primary_key=True)
+    registration_closed = Column(Boolean, nullable=False, default=False, server_default="0")
+
+
 class User(Base):
     __tablename__ = "users"
 

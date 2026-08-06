@@ -11,13 +11,13 @@ ACTIVE_STATES = {"pending", "running", "failed"}
 
 
 def create_migration(db: Session, configuration: dict) -> StorageMigration:
-    active = db.query(StorageMigration).filter(StorageMigration.state.in_(ACTIVE_STATES)).first()
-    if active:
-        raise ValueError("A storage migration is already active")
-    source = db.query(StorageProfile).filter_by(is_active=True).first()
+    source = db.query(StorageProfile).filter_by(is_active=True).with_for_update().first()
     if source is None:
         from app.storage import get_active_profile
         source = get_active_profile(db)
+    active = db.query(StorageMigration).filter(StorageMigration.state.in_(ACTIVE_STATES)).first()
+    if active:
+        raise ValueError("A storage migration is already active")
     candidate = StorageProfile(
         profile_uuid=str(uuid.uuid4()), backend_type=configuration.get("type", "local"),
         configuration=configuration, credential_version=1, is_active=False,
@@ -128,6 +128,9 @@ def copy_and_verify(db: Session, object_id: int, source, destination) -> bool:
 def cutover(db: Session, migration_id: int) -> bool:
     migration = db.get(StorageMigration, migration_id)
     candidate = db.get(StorageProfile, migration.destination_profile_id)
+    source = db.query(StorageProfile).filter_by(id=migration.source_profile_id).with_for_update().first()
+    if source is None or not source.is_active:
+        return False
     referenced = db.query(Document).filter(Document.storage_profile_id == migration.source_profile_id).all()
     ledger = {row.document_id: row for row in db.query(StorageMigrationObject).filter_by(migration_id=migration.id).all()}
     if candidate.credential_version != migration.candidate_credential_version:

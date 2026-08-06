@@ -140,14 +140,19 @@ def delete_vehicle(
     if vehicle.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     from app.models import Document
-    from app.services.storage_cleanup import schedule_cleanup
+    from app.services.storage_cleanup import run_cleanup, schedule_cleanup
     vehicle.primary_photo_id = None
     db.flush()
+    cleanup_ids = []
     for doc in db.query(Document).filter_by(vehicle_id=vehicle.id).all():
         if doc.storage_profile_id:
-            schedule_cleanup(db, doc.storage_profile_id, doc.storage_path)
+            cleanup = schedule_cleanup(db, doc.storage_profile_id, doc.storage_path)
+            db.flush()
+            cleanup_ids.append(cleanup.id)
     db.delete(vehicle)
     db.commit()
+    for cleanup_id in cleanup_ids:
+        run_cleanup(db, cleanup_id)
     return {"message": "Vehicle deleted"}
 
 

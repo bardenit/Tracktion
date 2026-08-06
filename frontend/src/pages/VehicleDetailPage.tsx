@@ -659,6 +659,7 @@ export default function VehicleDetailPage() {
   // Photo gallery state
   const [vehiclePhotos, setVehiclePhotos] = useState<VehiclePhoto[]>([]);
   const [photoBlobMap, setPhotoBlobMap] = useState<Record<number, string>>({});
+  const photoBlobMapRef = useRef<Record<number, string>>({});
 
   // Tire state
   const [tireEvents, setTireEvents] = useState<TireEvent[]>([]);
@@ -783,9 +784,14 @@ export default function VehicleDetailPage() {
     }));
     setPhotoBlobMap((prev) => {
       Object.values(prev).forEach((url) => URL.revokeObjectURL(url));
+      photoBlobMapRef.current = blobMap;
       return blobMap;
     });
   }, [id]);
+
+  useEffect(() => () => {
+    Object.values(photoBlobMapRef.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   const loadInspection = useCallback(async () => {
     setInspectionItems(await apiClient.listInspectionItems(id));
@@ -932,20 +938,24 @@ export default function VehicleDetailPage() {
       if (editFuel) {
         await apiClient.updateFuelEntry(id, editFuel.id, payload);
       } else {
-        await apiClient.createFuelEntry(id, payload);
+        const operationId = crypto.randomUUID();
+        try {
+          await apiClient.createFuelEntry(id, { ...payload, operation_id: operationId });
+        } catch (err: any) {
+          if (!err.response) {
+            apiClient.queueFuelEntry(id, payload, operationId);
+            closeFuelModal();
+            addToast('info', 'Offline — fill-up saved on this device and will sync when you\'re back online');
+            return;
+          }
+          throw err;
+        }
       }
       closeFuelModal();
       loadFuel().catch(console.error);
       addToast('success', editFuel ? 'Fuel entry updated' : 'Fill-up logged');
     } catch (err: any) {
-      if (!editFuel && !err.response) {
-        // No connectivity (e.g. at the pump) — queue locally and sync later
-        apiClient.queueFuelEntry(id, payload);
-        closeFuelModal();
-        addToast('info', 'Offline — fill-up saved on this device and will sync when you\'re back online');
-      } else {
-        setFormError(err.response?.data?.detail || 'Failed to save');
-      }
+      setFormError(err.response?.data?.detail || 'Failed to save');
     } finally {
       setSaving(false);
     }
@@ -1905,8 +1915,8 @@ export default function VehicleDetailPage() {
             <h2 className="text-lg font-semibold text-white">Fuel History</h2>
             <div className="flex gap-2">
               {fuelEntries.length > 0 && (
-                <>
-                  <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, partial_fillup: e.partial_fillup ?? false, missed_fillup: e.missed_fillup ?? false, octane: e.octane ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, partial_fillup: e.partial_fillup ?? false, missed_fillup: e.missed_fillup ?? false, octane: e.octane ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+              )}
                   <label className="btn-secondary text-sm cursor-pointer">
                     Import CSV
                     <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
@@ -1925,8 +1935,6 @@ export default function VehicleDetailPage() {
                       } catch (error) { addToast('error', normalizeApiError(error).message); }
                     }} />
                   </label>
-                </>
-              )}
               <button onClick={openFuelAdd} className="btn-primary text-sm">+ Log Fill-up</button>
             </div>
           </div>
@@ -2254,8 +2262,8 @@ export default function VehicleDetailPage() {
               <h2 className="text-lg font-semibold text-white">Service History</h2>
               <div className="flex gap-2">
                 {maintEntries.length > 0 && (
-                  <>
-                    <button onClick={() => downloadCSV(maintEntries.map((e) => ({ date: e.date, type: e.type, mileage: e.mileage, cost: e.cost, provider: e.service_provider ?? '', notes: e.notes ?? '' })), 'maintenance-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                  <button onClick={() => downloadCSV(maintEntries.map((e) => ({ date: e.date, type: e.type, mileage: e.mileage, cost: e.cost, provider: e.service_provider ?? '', notes: e.notes ?? '' })), 'maintenance-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                )}
                     <label className="btn-secondary text-sm cursor-pointer">
                       Import CSV
                       <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
@@ -2270,8 +2278,6 @@ export default function VehicleDetailPage() {
                         } catch (error) { addToast('error', normalizeApiError(error).message); }
                       }} />
                     </label>
-                  </>
-                )}
                 <button onClick={openMaintAdd} className="btn-primary text-sm">+ Log Service</button>
               </div>
             </div>
@@ -2538,8 +2544,8 @@ export default function VehicleDetailPage() {
             <h2 className="text-lg font-semibold text-white">Expenses</h2>
             <div className="flex gap-2">
               {expenses.length > 0 && (
-                <>
-                  <button onClick={() => downloadCSV(expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, amount: e.amount, expires_on: e.expires_on ?? '' })), 'expenses.csv')} className="btn-secondary text-sm">Export CSV</button>
+                <button onClick={() => downloadCSV(expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, amount: e.amount, expires_on: e.expires_on ?? '' })), 'expenses.csv')} className="btn-secondary text-sm">Export CSV</button>
+              )}
                   <label className="btn-secondary text-sm cursor-pointer">
                     Import CSV
                     <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
@@ -2554,8 +2560,6 @@ export default function VehicleDetailPage() {
                       } catch (error) { addToast('error', normalizeApiError(error).message); }
                     }} />
                   </label>
-                </>
-              )}
               <button onClick={openExpenseAdd} className="btn-primary text-sm">+ Add Expense</button>
             </div>
           </div>

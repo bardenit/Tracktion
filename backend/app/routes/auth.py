@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 from app.database import get_db
-from app.models import RefreshSession, User
+from app.models import InstallationState, RefreshSession, User
 from app.schemas import UserCreate, UserLogin, TokenResponse, UserResponse, RefreshRequest, ChangePasswordRequest
 from app.auth import (
     create_access_token, create_refresh_token, get_current_user, hash_password,
@@ -15,7 +15,8 @@ router = APIRouter()
 
 @router.post("/register", response_model=UserResponse)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).count() > 0:
+    installation = db.query(InstallationState).filter_by(id=1).with_for_update().one()
+    if installation.registration_closed:
         raise HTTPException(status_code=403, detail="Registration is closed")
     user = User(
         email=user_data.email,
@@ -23,6 +24,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         is_admin=True,
     )
     db.add(user)
+    installation.registration_closed = True
     db.commit()
     db.refresh(user)
     return user

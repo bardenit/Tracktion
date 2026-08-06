@@ -19,17 +19,6 @@ router = APIRouter()
 
 VALID_DOC_TYPES = {"registration", "insurance", "receipt", "service", "warranty", "other"}
 
-ALLOWED_TYPES = {
-    "application/pdf",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/heic",
-    "image/heif",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
-
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
@@ -55,7 +44,7 @@ def _safe_filename(filename: str | None, fallback: str = 'file') -> str:
     return name[:255] or fallback
 
 
-def detect_content_type(data: bytes, claimed: str | None) -> str:
+def detect_content_type(data: bytes) -> str:
     signatures = ((b"%PDF-", "application/pdf"), (b"\xff\xd8\xff", "image/jpeg"),
                   (b"\x89PNG\r\n\x1a\n", "image/png"), (b"RIFF", "image/webp"),
                   (b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
@@ -109,7 +98,7 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Maintenance entry does not belong to this vehicle")
     data = await _read_limited(file)
     try:
-        content_type = detect_content_type(data, file.content_type)
+        content_type = detect_content_type(data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     safe_name = _safe_filename(file.filename)
@@ -177,7 +166,7 @@ def download_document(
     except Exception:
         raise HTTPException(status_code=404, detail="File not found in storage")
 
-    media_type = _media_type(doc.filename or '')
+    media_type = doc.content_type or _media_type(doc.filename or '')
     disposition = 'inline' if media_type.startswith('image/') else 'attachment'
     encoded_name = quote(doc.filename or 'file', safe='')
     return StreamingResponse(
@@ -226,7 +215,7 @@ async def upload_vehicle_photo(
 
     data = await _read_limited(file)
     try:
-        content_type = detect_content_type(data, file.content_type)
+        content_type = detect_content_type(data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if content_type not in IMAGE_TYPES:
@@ -326,7 +315,7 @@ def get_vehicle_photo(
         content = get_storage_for_profile(db, doc.storage_profile_id).load(doc.storage_path)
     except Exception:
         raise HTTPException(status_code=404, detail="Photo not found in storage")
-    media_type = _media_type(doc.filename or '')
+    media_type = doc.content_type or _media_type(doc.filename or '')
     return StreamingResponse(
         io.BytesIO(content),
         media_type=media_type,
