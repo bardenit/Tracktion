@@ -137,6 +137,20 @@ class FuelIdempotencyOperation(Base):
     fuel_entry = relationship("FuelEntry")
 
 
+class BulkImportOperation(Base):
+    __tablename__ = "bulk_import_operations"
+    __table_args__ = (UniqueConstraint("user_id", "operation_id", name="uq_bulk_import_user_id"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    operation_id = Column(String(36), nullable=False)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource = Column(String(32), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    imported_count = Column(Integer, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+
 class MaintenanceEntry(Base):
     __tablename__ = "maintenance_entries"
 

@@ -13,13 +13,38 @@ from app.schemas import (
     MaintenanceReminderUpdate,
     MaintenanceReminderResponse,
     MaintenanceCompletionCreate,
+    MaintenanceBulkImport,
+    BulkImportResponse,
 )
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
 from app.services.maintenance_reminders import recompute_reminders
 from app.services.vehicle_mileage import observe_vehicle_mileage
+from app.services.bulk_imports import begin_bulk_import, finish_bulk_import
 
 router = APIRouter()
+
+
+@router.post("/{vehicle_id}/entries/bulk", response_model=BulkImportResponse)
+def import_maintenance_entries(vehicle_id: int, batch: MaintenanceBulkImport, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    operation_id, payload_hash, previous = begin_bulk_import(db, current_user.id, vehicle_id, "maintenance", batch)
+    if previous:
+        return BulkImportResponse(operation_id=operation_id, imported_count=previous.imported_count)
+    types = set()
+    try:
+        for item in batch.entries:
+            db.add(MaintenanceEntry(vehicle_id=vehicle_id, **item.model_dump()))
+            types.add(item.type)
+        db.flush()
+        observe_vehicle_mileage(db, vehicle_id, max(item.mileage for item in batch.entries))
+        recompute_reminders(db, vehicle_id, sorted(types))
+        finish_bulk_import(db, current_user.id, vehicle_id, "maintenance", operation_id, payload_hash, len(batch.entries))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return BulkImportResponse(operation_id=operation_id, imported_count=len(batch.entries))
 
 
 @router.post("/{vehicle_id}/entries", response_model=MaintenanceEntryResponse)

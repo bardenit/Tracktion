@@ -7,13 +7,40 @@ import json
 from uuid import UUID
 
 from app.models import User, FuelEntry, FuelIdempotencyOperation
-from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate
+from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate, FuelBulkImport, BulkImportResponse
+from app.services.bulk_imports import begin_bulk_import, finish_bulk_import
 from app.services.fuel_calculations import recalculate_fuel_economy, validate_fuel_entry_order
 from app.services.vehicle_mileage import observe_vehicle_mileage
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
 
 router = APIRouter()
+
+
+@router.post("/{vehicle_id}/entries/bulk", response_model=BulkImportResponse)
+def import_fuel_entries(vehicle_id: int, batch: FuelBulkImport, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    operation_id, payload_hash, previous = begin_bulk_import(db, current_user.id, vehicle_id, "fuel", batch)
+    if previous:
+        return BulkImportResponse(operation_id=operation_id, imported_count=previous.imported_count)
+    existing = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
+    ordered = sorted(batch.entries, key=lambda item: (item.date, item.mileage))
+    combined = list(existing)
+    try:
+        for item in ordered:
+            validate_fuel_entry_order(combined, item.date, item.mileage)
+            entry = FuelEntry(vehicle_id=vehicle_id, **item.model_dump(exclude={"operation_id"}))
+            db.add(entry)
+            db.flush()
+            combined.append(entry)
+        recalculate_vehicle_fuel_economy(vehicle_id, db)
+        observe_vehicle_mileage(db, vehicle_id, max(item.mileage for item in ordered))
+        finish_bulk_import(db, current_user.id, vehicle_id, "fuel", operation_id, payload_hash, len(ordered))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return BulkImportResponse(operation_id=operation_id, imported_count=len(ordered))
 
 
 def recalculate_vehicle_fuel_economy(vehicle_id: int, db: Session) -> None:

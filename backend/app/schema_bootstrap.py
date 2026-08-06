@@ -10,7 +10,9 @@ from app import models  # noqa: F401
 BASELINE_REVISION = "0002_legacy_compatibility"
 VERSION_TABLE = "alembic_version"
 OPTIONAL_LEGACY_TABLES = {"inspection_items", "tire_events", "refresh_sessions", "storage_profiles",
-                          "storage_migrations", "storage_migration_objects", "storage_cleanups"}
+                          "storage_migrations", "storage_migration_objects", "storage_cleanups",
+                          "fuel_idempotency_operations", "maintenance_completion_operations",
+                          "bulk_import_operations"}
 KNOWN_ADDITIVE_COLUMNS = {
     "users": {"failed_login_attempts", "last_failed_login_at", "locked_until", "is_admin"},
     "maintenance_reminders": {"target_mileage", "reminder_miles"},

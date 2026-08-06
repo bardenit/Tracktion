@@ -85,4 +85,23 @@ describe('apiClient test isolation', () => {
     expect(apiClient.getOfflineFuelQueue().map((item) => item.status)).toEqual(['pending', 'conflict'])
     expect(apiClient.getOfflineFuelQueue()[1].conflictReason).toContain('bad mileage')
   })
+
+  it('coalesces duplicate deletes while a request is pending', async () => {
+    const { apiClient } = await import('./api')
+    let resolve!: () => void
+    const request = vi.fn(() => new Promise<void>((done) => { resolve = done }))
+    const first = apiClient.deleteOnce('fuel:1', request)
+    const second = apiClient.deleteOnce('fuel:1', request)
+    expect(request).toHaveBeenCalledOnce()
+    expect(second).toBe(first)
+    resolve()
+    await first
+  })
+
+  it('sends one typed batch request with the import operation id', async () => {
+    axiosClient.post.mockResolvedValue({ data: { operation_id: 'id', imported_count: 1 } })
+    const { apiClient } = await import('./api')
+    await apiClient.importFuelEntries(7, 'id', [{ date: '2026-08-01', mileage: 1, gallons: 1, cost: 3, missed_fillup: false, partial_fillup: true }])
+    expect(axiosClient.post).toHaveBeenCalledWith('/fuel/7/entries/bulk', expect.objectContaining({ operation_id: 'id' }))
+  })
 })

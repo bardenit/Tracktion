@@ -267,6 +267,26 @@ class ExpenseResponse(BaseModel):
         from_attributes = True
 
 
+class FuelBulkImport(BaseModel):
+    operation_id: str = Field(..., min_length=36, max_length=36)
+    entries: list[FuelEntryCreate] = Field(..., min_length=1, max_length=5000)
+
+
+class MaintenanceBulkImport(BaseModel):
+    operation_id: str = Field(..., min_length=36, max_length=36)
+    entries: list[MaintenanceEntryCreate] = Field(..., min_length=1, max_length=5000)
+
+
+class ExpenseBulkImport(BaseModel):
+    operation_id: str = Field(..., min_length=36, max_length=36)
+    entries: list[ExpenseCreate] = Field(..., min_length=1, max_length=5000)
+
+
+class BulkImportResponse(BaseModel):
+    operation_id: str
+    imported_count: int
+
+
 # Document Schemas
 class DocumentCreate(BaseModel):
     document_type: str

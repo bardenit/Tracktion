@@ -19,6 +19,11 @@ export interface OfflineFuelQueueItem {
   conflictReason?: string;
 }
 
+export interface BulkImportResponse { operation_id: string; imported_count: number }
+export interface FuelImportEntry { date: string; mileage: number; gallons: number; cost: number; location?: string; notes?: string; octane?: number; missed_fillup: boolean; partial_fillup: boolean }
+export interface MaintenanceImportEntry { date: string; mileage: number; type: string; cost: number; service_provider?: string; notes?: string }
+export interface ExpenseImportEntry { category: string; amount: number; date: string; description: string; expires_on?: string }
+
 function resizeImageForUpload(
   file: File,
   maxDim: number,
@@ -76,6 +81,15 @@ class ApiClient {
   private refreshPromise: Promise<string> | null = null;
   private onLogoutCallback: (() => void) | null = null;
   private authenticatedUserId: number | null = null;
+  private pendingDeletes = new Map<string, Promise<unknown>>();
+
+  deleteOnce<T>(key: string, request: () => Promise<T>): Promise<T> {
+    const pending = this.pendingDeletes.get(key) as Promise<T> | undefined;
+    if (pending) return pending;
+    const next = request().finally(() => this.pendingDeletes.delete(key));
+    this.pendingDeletes.set(key, next);
+    return next;
+  }
 
   setOnLogout(cb: () => void) {
     this.onLogoutCallback = cb;
@@ -459,6 +473,11 @@ class ApiClient {
     return response.data;
   }
 
+  async importFuelEntries(vehicleId: number, operationId: string, entries: FuelImportEntry[]): Promise<BulkImportResponse> {
+    const response = await this.client.post(`/fuel/${vehicleId}/entries/bulk`, { operation_id: operationId, entries });
+    return response.data;
+  }
+
   // ── Offline fuel queue ──────────────────────────────────────────────────
   // Fill-ups logged with no signal are stored locally and synced when back online.
 
@@ -557,6 +576,11 @@ class ApiClient {
     return response.data;
   }
 
+  async importMaintenanceEntries(vehicleId: number, operationId: string, entries: MaintenanceImportEntry[]): Promise<BulkImportResponse> {
+    const response = await this.client.post(`/maintenance/${vehicleId}/entries/bulk`, { operation_id: operationId, entries });
+    return response.data;
+  }
+
   async listMaintenanceEntries(vehicleId: number): Promise<MaintenanceEntry[]> {
     const response = await this.client.get(`/maintenance/${vehicleId}/entries`);
     return response.data;
@@ -610,6 +634,11 @@ class ApiClient {
   // Expense endpoints
   async createExpense(vehicleId: number, expenseData: any) {
     const response = await this.client.post(`/expenses/${vehicleId}/entries`, expenseData);
+    return response.data;
+  }
+
+  async importExpenses(vehicleId: number, operationId: string, entries: ExpenseImportEntry[]): Promise<BulkImportResponse> {
+    const response = await this.client.post(`/expenses/${vehicleId}/entries/bulk`, { operation_id: operationId, entries });
     return response.data;
   }
 

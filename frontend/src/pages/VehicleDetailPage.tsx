@@ -6,6 +6,8 @@ import { useToastStore } from '../stores/toastStore';
 import { useAuthStore } from '../stores/authStore';
 import { getUserStringList, setUserStringList } from '../services/userStorage';
 import AnalyticsTab from '../components/AnalyticsTab';
+import { csvBoolean, csvDate, csvNumber, exportCsv, parseCsvObjects } from '../services/csv';
+import { normalizeApiError } from '../services/errors';
 import type {
   Vehicle, FuelEntry, MaintenanceEntry, Reminder, TripEntry,
   Expense, VehicleDocument, VehiclePhoto, VehiclePart, InspectionItem, TireEvent,
@@ -30,8 +32,13 @@ const TRAILER_SERVICE_TYPES = [
 
 const EXPENSE_CATEGORIES = ['insurance', 'registration', 'repair', 'fuel', 'other'];
 const DOC_TYPES = ['registration', 'insurance', 'receipt', 'service', 'warranty', 'other'];
+const FUEL_CSV_HEADERS = ['date', 'mileage', 'gallons', 'cost', 'partial_fillup', 'missed_fillup', 'octane', 'location', 'notes'] as const;
+const MAINT_CSV_HEADERS = ['date', 'type', 'mileage', 'cost', 'provider', 'notes'] as const;
+const EXPENSE_CSV_HEADERS = ['date', 'category', 'description', 'amount', 'expires_on'] as const;
 
 const today = () => new Date().toISOString().split('T')[0];
+const compactPairs = (pairs: Array<false | null | undefined | '' | [string, unknown]>): [string, unknown][] =>
+  pairs.filter((pair): pair is [string, unknown] => Array.isArray(pair));
 
 const initialFuelForm = () => ({
   date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '',
@@ -75,32 +82,12 @@ async function shareOrDownloadBlob(blob: Blob, filename: string) {
 function downloadCSV(rows: Record<string, unknown>[], filename: string) {
   if (!rows.length) return;
   const keys = Object.keys(rows[0]);
-  const escape = (v: unknown) => JSON.stringify(v ?? '');
-  const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => escape(r[k])).join(','))].join('\n');
+  const csv = exportCsv(keys, rows);
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
-}
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
-  return lines.slice(1).map((line) => {
-    const cols: string[] = [];
-    let cur = ''; let inQ = false;
-    for (const ch of line) {
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { cols.push(cur); cur = ''; }
-      else { cur += ch; }
-    }
-    cols.push(cur);
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = (cols[i] ?? '').trim(); });
-    return row;
-  }).filter((r) => Object.values(r).some((v) => v !== ''));
 }
 
 function fmtDate(dateStr: string) {
@@ -150,7 +137,6 @@ function TankSizeRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Ve
   const [value, setValue] = useState(String(vehicle.tank_size_gallons ?? ''));
   const [saving, setSaving] = useState(false);
   const addToast = useToastStore((state) => state.addToast);
-
   const save = async () => {
     setSaving(true);
     try {
@@ -733,6 +719,17 @@ export default function VehicleDetailPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const addToast = useToastStore((state) => state.addToast);
+  const runDelete = async (key: string, request: () => Promise<unknown>, remove: () => void, success: string) => {
+    try {
+      await apiClient.deleteOnce(key, request);
+      remove();
+      addToast('success', success);
+    } catch (error) {
+      const normalized = normalizeApiError(error);
+      if (normalized.notFound) remove();
+      else addToast('error', normalized.message);
+    }
+  };
 
   // ─── Data loaders ───────────────────────────────────────────────────────────
 
@@ -956,9 +953,7 @@ export default function VehicleDetailPage() {
 
   const deleteFuel = async (entryId: number) => {
     if (!confirm('Delete this fuel entry?')) return;
-    await apiClient.deleteFuelEntry(id, entryId).catch(console.error);
-    loadFuel().catch(console.error);
-    addToast('success', 'Fuel entry deleted');
+    await runDelete(`fuel:${entryId}`, () => apiClient.deleteFuelEntry(id, entryId), () => setFuelEntries((items) => items.filter((item) => item.id !== entryId)), 'Fuel entry deleted');
   };
 
   // ─── Maintenance handlers ────────────────────────────────────────────────────
@@ -1013,9 +1008,7 @@ export default function VehicleDetailPage() {
 
   const deleteMaint = async (entryId: number) => {
     if (!confirm('Delete this service record?')) return;
-    await apiClient.deleteMaintenanceEntry(id, entryId).catch(console.error);
-    loadMaintenance().catch(console.error);
-    addToast('success', 'Service record deleted');
+    await runDelete(`maintenance:${entryId}`, () => apiClient.deleteMaintenanceEntry(id, entryId), () => setMaintEntries((items) => items.filter((item) => item.id !== entryId)), 'Service record deleted');
   };
 
   const saveReminder = async (e: React.FormEvent) => {
@@ -1042,9 +1035,7 @@ export default function VehicleDetailPage() {
 
   const deleteReminder = async (reminderId: number) => {
     if (!confirm('Delete this reminder?')) return;
-    await apiClient.deleteMaintenanceReminder(id, reminderId).catch(console.error);
-    loadMaintenance().catch(console.error);
-    addToast('success', 'Reminder deleted');
+    await runDelete(`reminder:${reminderId}`, () => apiClient.deleteMaintenanceReminder(id, reminderId), () => setReminders((items) => items.filter((item) => item.id !== reminderId)), 'Reminder deleted');
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1121,9 +1112,7 @@ export default function VehicleDetailPage() {
 
   const deleteExpense = async (expenseId: number) => {
     if (!confirm('Delete this expense?')) return;
-    await apiClient.deleteExpense(id, expenseId).catch(console.error);
-    loadExpenses().catch(console.error);
-    addToast('success', 'Expense deleted');
+    await runDelete(`expense:${expenseId}`, () => apiClient.deleteExpense(id, expenseId), () => setExpenses((items) => items.filter((item) => item.id !== expenseId)), 'Expense deleted');
   };
 
   // ─── Document handlers ───────────────────────────────────────────────────────
@@ -1154,9 +1143,7 @@ export default function VehicleDetailPage() {
 
   const deleteDocument = async (docId: number) => {
     if (!confirm('Delete this document?')) return;
-    await apiClient.deleteDocument(id, docId).catch(console.error);
-    loadDocuments().catch(console.error);
-    addToast('success', 'Document deleted');
+    await runDelete(`document:${docId}`, () => apiClient.deleteDocument(id, docId), () => setDocuments((items) => items.filter((item) => item.id !== docId)), 'Document deleted');
   };
 
   // ─── Reminder helpers ────────────────────────────────────────────────────────
@@ -1252,9 +1239,7 @@ export default function VehicleDetailPage() {
 
   const deleteTireEvent = async (eventId: number) => {
     if (!confirm('Delete this tire record?')) return;
-    await apiClient.deleteTireEvent(id, eventId).catch(console.error);
-    setTireEvents((prev) => prev.filter((e) => e.id !== eventId));
-    addToast('success', 'Deleted');
+    await runDelete(`tire:${eventId}`, () => apiClient.deleteTireEvent(id, eventId), () => setTireEvents((items) => items.filter((item) => item.id !== eventId)), 'Deleted');
   };
 
   const startReminderNow = async (r: Reminder) => {
@@ -1535,7 +1520,7 @@ export default function VehicleDetailPage() {
     ...(!isTrailer ? [{ id: 'nhtsa' as Tab, label: 'NHTSA' }] : []),
   ];
 
-  const effectiveSpecs = { ...(vehicle.nhtsa_data || {}), ...(vehicle.specs_overrides || {}) };
+  const effectiveSpecs: Record<string, any> = { ...(vehicle.nhtsa_data || {}), ...(vehicle.specs_overrides || {}) };
 
   return (
     <div className="space-y-6">
@@ -1717,14 +1702,14 @@ export default function VehicleDetailPage() {
                   <div>
                     <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Engine</h3>
                     <div className="space-y-1.5">
-                      {[
+                      {compactPairs([
                         effectiveSpecs.engine_model && ['Model', effectiveSpecs.engine_model],
                         effectiveSpecs.engine_displacement_l && ['Displacement', `${effectiveSpecs.engine_displacement_l}L`],
                         effectiveSpecs.engine_cylinders && ['Cylinders', effectiveSpecs.engine_cylinders],
                         effectiveSpecs.engine_hp && ['Horsepower', `${effectiveSpecs.engine_hp} hp`],
                         effectiveSpecs.turbo && ['Turbocharged', effectiveSpecs.turbo],
                         effectiveSpecs.fuel_type && ['Fuel', effectiveSpecs.fuel_type],
-                      ].filter(Boolean).map(([label, value]) => (
+                      ]).map(([label, value]) => (
                         <div key={label as string} className="flex justify-between text-sm">
                           <span className="text-slate-400">{label as string}</span>
                           <span className={`text-right ml-4 text-sm ${vehicle.specs_overrides?.[label as string] !== undefined ? 'text-teal-300' : 'text-white'}`}>{String(value)}</span>
@@ -1737,11 +1722,11 @@ export default function VehicleDetailPage() {
                   <div>
                     <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Drivetrain</h3>
                     <div className="space-y-1.5">
-                      {[
+                      {compactPairs([
                         effectiveSpecs.drive_type && ['Drive Type', effectiveSpecs.drive_type],
                         effectiveSpecs.transmission_type && ['Transmission', effectiveSpecs.transmission_type],
                         effectiveSpecs.transmission_speeds && ['Speeds', effectiveSpecs.transmission_speeds],
-                      ].filter(Boolean).map(([label, value]) => (
+                      ]).map(([label, value]) => (
                         <div key={label as string} className="flex justify-between text-sm">
                           <span className="text-slate-400">{label as string}</span>
                           <span className={`text-right ml-4 text-sm ${vehicle.specs_overrides?.[label as string] !== undefined ? 'text-teal-300' : 'text-white'}`}>{String(value)}</span>
@@ -1754,7 +1739,7 @@ export default function VehicleDetailPage() {
                   <div>
                     <h3 className="text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Body & Trim</h3>
                     <div className="space-y-1.5">
-                      {[
+                      {compactPairs([
                         effectiveSpecs.body_class && ['Body', effectiveSpecs.body_class],
                         effectiveSpecs.cab_type && ['Cab', effectiveSpecs.cab_type],
                         effectiveSpecs.doors && ['Doors', effectiveSpecs.doors],
@@ -1762,7 +1747,7 @@ export default function VehicleDetailPage() {
                         effectiveSpecs.trim && ['Trim', effectiveSpecs.trim],
                         effectiveSpecs.gvwr && ['GVWR', effectiveSpecs.gvwr],
                         effectiveSpecs.plant_city && effectiveSpecs.plant_country && ['Built In', `${effectiveSpecs.plant_city}, ${effectiveSpecs.plant_country}`],
-                      ].filter(Boolean).map(([label, value]) => (
+                      ]).map(([label, value]) => (
                         <div key={label as string} className="flex justify-between text-sm">
                           <span className="text-slate-400">{label as string}</span>
                           <span className={`text-right ml-4 text-sm ${vehicle.specs_overrides?.[label as string] !== undefined ? 'text-teal-300' : 'text-white'}`}>{String(value)}</span>
@@ -1838,11 +1823,10 @@ export default function VehicleDetailPage() {
                         }} className="text-slate-400 hover:text-white text-xs mr-3">Edit</button>
                         <button onClick={async () => {
                           if (!confirm('Delete this trip? This will subtract the miles from the odometer.')) return;
-                          await apiClient.deleteTrip(id, t.id);
-                          const v = await apiClient.getVehicle(id);
-                          setVehicle(v);
-                          loadTrips();
-                          addToast('success', 'Trip deleted');
+                          await runDelete(`trip:${t.id}`, () => apiClient.deleteTrip(id, t.id), () => {
+                            setTripEntries((items) => items.filter((item) => item.id !== t.id));
+                            apiClient.getVehicle(id).then(setVehicle).catch(console.error);
+                          }, 'Trip deleted');
                         }} className="text-red-400 hover:text-red-300 text-xs">Delete</button>
                       </td>
                     </tr>
@@ -1922,25 +1906,23 @@ export default function VehicleDetailPage() {
             <div className="flex gap-2">
               {fuelEntries.length > 0 && (
                 <>
-                  <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, partial_fillup: e.partial_fillup ?? false, missed_fillup: e.missed_fillup ?? false, mpg: e.mpg ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                  <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, partial_fillup: e.partial_fillup ?? false, missed_fillup: e.missed_fillup ?? false, octane: e.octane ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
                   <label className="btn-secondary text-sm cursor-pointer">
                     Import CSV
                     <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
                       const file = ev.target.files?.[0]; ev.target.value = '';
                       if (!file) return;
                       const text = await file.text();
-                      const rows = parseCSV(text).sort((a, b) =>
-                        a.date.localeCompare(b.date) || Number(a.mileage) - Number(b.mileage)
-                      );
-                      let ok = 0; let fail = 0;
-                      for (const r of rows) {
-                        try {
-                          await apiClient.createFuelEntry(id, { date: r.date, mileage: Number(r.mileage), gallons: Number(r.gallons), cost: Number(r.cost), location: r.location || undefined, notes: r.notes || undefined, octane: r.octane ? Number(r.octane) : undefined, partial_fillup: r.partial_fillup === 'true', missed_fillup: r.missed_fillup === 'true' });
-                          ok++;
-                        } catch { fail++; }
-                      }
-                      loadFuel().catch(console.error);
-                      addToast(fail === 0 ? 'success' : 'error', `Imported ${ok} entries${fail ? `, ${fail} failed` : ''}`);
+                      try {
+                        const rows = parseCsvObjects(text, FUEL_CSV_HEADERS).map((r) => ({
+                          date: csvDate(r.date, 'date')!, mileage: csvNumber(r.mileage, 'mileage'), gallons: csvNumber(r.gallons, 'gallons'), cost: csvNumber(r.cost, 'cost'),
+                          partial_fillup: csvBoolean(r.partial_fillup, 'partial_fillup'), missed_fillup: csvBoolean(r.missed_fillup, 'missed_fillup'),
+                          octane: r.octane ? csvNumber(r.octane, 'octane') : undefined, location: r.location || undefined, notes: r.notes || undefined,
+                        })).sort((a, b) => a.date.localeCompare(b.date) || a.mileage - b.mileage);
+                        const result = await apiClient.importFuelEntries(id, crypto.randomUUID(), rows);
+                        await loadFuel();
+                        addToast('success', `Imported ${result.imported_count} entries`);
+                      } catch (error) { addToast('error', normalizeApiError(error).message); }
                     }} />
                   </label>
                 </>
@@ -2280,16 +2262,12 @@ export default function VehicleDetailPage() {
                         const file = ev.target.files?.[0]; ev.target.value = '';
                         if (!file) return;
                         const text = await file.text();
-                        const rows = parseCSV(text);
-                        let ok = 0; let fail = 0;
-                        for (const r of rows) {
-                          try {
-                            await apiClient.createMaintenanceEntry(id, { date: r.date, mileage: Number(r.mileage), type: r.type, cost: Number(r.cost), service_provider: r.provider || r.service_provider || undefined, notes: r.notes || undefined });
-                            ok++;
-                          } catch { fail++; }
-                        }
-                        loadMaintenance().catch(console.error);
-                        addToast(fail === 0 ? 'success' : 'error', `Imported ${ok} entries${fail ? `, ${fail} failed` : ''}`);
+                        try {
+                          const rows = parseCsvObjects(text, MAINT_CSV_HEADERS).map((r) => ({ date: csvDate(r.date, 'date')!, mileage: csvNumber(r.mileage, 'mileage'), type: r.type, cost: csvNumber(r.cost, 'cost'), service_provider: r.provider || undefined, notes: r.notes || undefined }));
+                          const result = await apiClient.importMaintenanceEntries(id, crypto.randomUUID(), rows);
+                          await loadMaintenance();
+                          addToast('success', `Imported ${result.imported_count} entries`);
+                        } catch (error) { addToast('error', normalizeApiError(error).message); }
                       }} />
                     </label>
                   </>
@@ -2568,16 +2546,12 @@ export default function VehicleDetailPage() {
                       const file = ev.target.files?.[0]; ev.target.value = '';
                       if (!file) return;
                       const text = await file.text();
-                      const rows = parseCSV(text);
-                      let ok = 0; let fail = 0;
-                      for (const r of rows) {
-                        try {
-                          await apiClient.createExpense(id, { date: r.date, category: r.category || 'other', description: r.description, amount: Number(r.amount), expires_on: r.expires_on || undefined });
-                          ok++;
-                        } catch { fail++; }
-                      }
-                      loadExpenses().catch(console.error);
-                      addToast(fail === 0 ? 'success' : 'error', `Imported ${ok} entries${fail ? `, ${fail} failed` : ''}`);
+                      try {
+                        const rows = parseCsvObjects(text, EXPENSE_CSV_HEADERS).map((r) => ({ date: csvDate(r.date, 'date')!, category: r.category, description: r.description, amount: csvNumber(r.amount, 'amount'), expires_on: csvDate(r.expires_on, 'expires_on', true) }));
+                        const result = await apiClient.importExpenses(id, crypto.randomUUID(), rows);
+                        await loadExpenses();
+                        addToast('success', `Imported ${result.imported_count} entries`);
+                      } catch (error) { addToast('error', normalizeApiError(error).message); }
                     }} />
                   </label>
                 </>
@@ -2957,9 +2931,7 @@ export default function VehicleDetailPage() {
                             }} className="text-slate-400 hover:text-white transition-colors text-xs">Edit</button>
                             <button onClick={async () => {
                               if (!confirm('Delete this part?')) return;
-                              await apiClient.deletePart(id, p.id);
-                              loadParts();
-                              addToast('success', 'Part deleted');
+                              await runDelete(`part:${p.id}`, () => apiClient.deletePart(id, p.id), () => setParts((items) => items.filter((item) => item.id !== p.id)), 'Part deleted');
                             }} className="text-red-400 hover:text-red-300 transition-colors text-xs">Delete</button>
                           </div>
                         </div>
@@ -3411,8 +3383,7 @@ export default function VehicleDetailPage() {
                         </button>
                         <button
                           onClick={async () => {
-                            await apiClient.deleteInspectionItem(id, item.id);
-                            loadInspection();
+                            await runDelete(`inspection:${item.id}`, () => apiClient.deleteInspectionItem(id, item.id), () => setInspectionItems((items) => items.filter((entry) => entry.id !== item.id)), 'Inspection item deleted');
                           }}
                           className="text-slate-600 hover:text-red-400 text-xs transition-colors flex-shrink-0"
                         >✕</button>

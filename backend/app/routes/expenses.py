@@ -3,11 +3,30 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models import User, Expense
-from app.schemas import ExpenseCreate, ExpenseResponse
+from app.schemas import ExpenseCreate, ExpenseResponse, ExpenseBulkImport, BulkImportResponse
+from app.services.bulk_imports import begin_bulk_import, finish_bulk_import
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
 
 router = APIRouter()
+
+
+@router.post("/{vehicle_id}/entries/bulk", response_model=BulkImportResponse)
+def import_expenses(vehicle_id: int, batch: ExpenseBulkImport, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    operation_id, payload_hash, previous = begin_bulk_import(db, current_user.id, vehicle_id, "expenses", batch)
+    if previous:
+        return BulkImportResponse(operation_id=operation_id, imported_count=previous.imported_count)
+    try:
+        for item in batch.entries:
+            db.add(Expense(vehicle_id=vehicle_id, **item.model_dump()))
+        db.flush()
+        finish_bulk_import(db, current_user.id, vehicle_id, "expenses", operation_id, payload_hash, len(batch.entries))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return BulkImportResponse(operation_id=operation_id, imported_count=len(batch.entries))
 
 
 @router.post("/{vehicle_id}/entries", response_model=ExpenseResponse)
