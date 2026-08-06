@@ -3,11 +3,22 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models import User, FuelEntry
-from app.schemas import FuelEntryCreate, FuelEntryResponse
+from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate
+from app.services.fuel_calculations import recalculate_fuel_economy, validate_fuel_entry_order
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
 
 router = APIRouter()
+
+
+def recalculate_vehicle_fuel_economy(vehicle_id: int, db: Session) -> None:
+    entries = (
+        db.query(FuelEntry)
+        .filter(FuelEntry.vehicle_id == vehicle_id)
+        .order_by(FuelEntry.date.asc(), FuelEntry.mileage.asc(), FuelEntry.id.asc())
+        .all()
+    )
+    recalculate_fuel_economy(entries)
 
 
 @router.post("/{vehicle_id}/entries", response_model=FuelEntryResponse)
@@ -19,26 +30,11 @@ def create_fuel_entry(
 ):
     vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
-    previous_entry = (
-        db.query(FuelEntry)
-        .filter(FuelEntry.vehicle_id == vehicle_id)
-        .order_by(FuelEntry.date.desc())
-        .first()
-    )
-
-    if previous_entry and entry_data.mileage <= previous_entry.mileage:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mileage must be greater than your last fill-up at {int(previous_entry.mileage):,} mi",
-        )
-
-    mpg = None
-    cost_per_mile = None
-    if previous_entry and not entry_data.missed_fillup:
-        miles_driven = entry_data.mileage - previous_entry.mileage
-        if miles_driven > 0:
-            mpg = miles_driven / entry_data.gallons
-            cost_per_mile = entry_data.cost / miles_driven
+    entries = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
+    try:
+        validate_fuel_entry_order(entries, entry_data.date, entry_data.mileage)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     entry = FuelEntry(
         vehicle_id=vehicle_id,
@@ -50,10 +46,11 @@ def create_fuel_entry(
         notes=entry_data.notes,
         octane=entry_data.octane,
         missed_fillup=entry_data.missed_fillup,
-        mpg=mpg,
-        cost_per_mile=cost_per_mile,
+        partial_fillup=entry_data.partial_fillup,
     )
     db.add(entry)
+    db.flush()
+    recalculate_vehicle_fuel_economy(vehicle_id, db)
 
     if entry_data.mileage > vehicle.current_mileage:
         vehicle.current_mileage = entry_data.mileage
@@ -73,7 +70,7 @@ def list_fuel_entries(
     return (
         db.query(FuelEntry)
         .filter(FuelEntry.vehicle_id == vehicle_id)
-        .order_by(FuelEntry.date.desc())
+        .order_by(FuelEntry.date.desc(), FuelEntry.mileage.desc(), FuelEntry.id.desc())
         .all()
     )
 
@@ -96,7 +93,7 @@ def get_fuel_entry(
 def update_fuel_entry(
     vehicle_id: int,
     entry_id: int,
-    entry_data: FuelEntryCreate,
+    entry_data: FuelEntryUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -105,24 +102,20 @@ def update_fuel_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Fuel entry not found")
 
-    mpg = entry.mpg
-    cost_per_mile = entry.cost_per_mile
+    entries = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
+    try:
+        validate_fuel_entry_order(entries, entry_data.date, entry_data.mileage, exclude_id=entry.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if entry.mileage != entry_data.mileage or entry.gallons != entry_data.gallons or bool(entry.missed_fillup) != entry_data.missed_fillup:
-        previous_entry = (
-            db.query(FuelEntry)
-            .filter(FuelEntry.vehicle_id == vehicle_id, FuelEntry.date < entry_data.date, FuelEntry.id != entry.id)
-            .order_by(FuelEntry.date.desc())
-            .first()
-        )
-        mpg = None
-        cost_per_mile = None
-        if previous_entry and not entry_data.missed_fillup:
-            miles_driven = entry_data.mileage - previous_entry.mileage
-            if miles_driven > 0:
-                mpg = miles_driven / entry_data.gallons
-                cost_per_mile = entry_data.cost / miles_driven
-
+    calculation_values = (
+        entry.date,
+        entry.mileage,
+        entry.gallons,
+        entry.cost,
+        bool(entry.missed_fillup),
+        bool(entry.partial_fillup),
+    )
     entry.date = entry_data.date
     entry.mileage = entry_data.mileage
     entry.gallons = entry_data.gallons
@@ -131,8 +124,22 @@ def update_fuel_entry(
     entry.notes = entry_data.notes
     entry.octane = entry_data.octane
     entry.missed_fillup = entry_data.missed_fillup
-    entry.mpg = mpg
-    entry.cost_per_mile = cost_per_mile
+    partial_fillup = (
+        entry_data.partial_fillup
+        if "partial_fillup" in entry_data.model_fields_set
+        else bool(entry.partial_fillup)
+    )
+    entry.partial_fillup = partial_fillup
+    if calculation_values != (
+        entry_data.date,
+        entry_data.mileage,
+        entry_data.gallons,
+        entry_data.cost,
+        entry_data.missed_fillup,
+        partial_fillup,
+    ):
+        db.flush()
+        recalculate_vehicle_fuel_economy(vehicle_id, db)
 
     if entry_data.mileage > vehicle.current_mileage:
         vehicle.current_mileage = entry_data.mileage
@@ -154,6 +161,8 @@ def delete_fuel_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Fuel entry not found")
     db.delete(entry)
+    db.flush()
+    recalculate_vehicle_fuel_economy(vehicle_id, db)
     db.commit()
     return {"message": "Fuel entry deleted"}
 

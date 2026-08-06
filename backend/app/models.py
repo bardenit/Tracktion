@@ -92,6 +92,7 @@ class FuelEntry(Base):
     notes = Column(Text, nullable=True)
     octane = Column(Integer, nullable=True)
     missed_fillup = Column(Boolean, default=False)  # Unlogged fill(s) since previous entry — MPG not computable
+    partial_fillup = Column(Boolean, default=False)  # Tank was not filled completely; defer MPG until next full fill
     mpg = Column(Float, nullable=True)  # Calculated
     cost_per_mile = Column(Float, nullable=True)  # Calculated
     created_at = Column(DateTime, server_default=func.now())

@@ -31,6 +31,23 @@ const DOC_TYPES = ['registration', 'insurance', 'receipt', 'service', 'warranty'
 
 const today = () => new Date().toISOString().split('T')[0];
 
+const initialFuelForm = () => ({
+  date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '',
+  octane: '', missed_fillup: false, partial_fillup: false,
+});
+
+function FuelEconomyValue({ entry }: { entry: FuelEntry }) {
+  if (entry.partial_fillup || entry.missed_fillup) {
+    return (
+      <span className="inline-flex gap-1">
+        {entry.partial_fillup && <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-900/50 text-blue-300" title="Partial fill-up — MPG will be calculated at the next full fill-up">partial</span>}
+        {entry.missed_fillup && <span className="text-xs px-2 py-0.5 rounded font-medium bg-amber-900/50 text-amber-300" title="Missed fill-up — MPG not computable for this interval">missed</span>}
+      </span>
+    );
+  }
+  return entry.mpg != null ? Number(entry.mpg).toFixed(1) : '—';
+}
+
 // iOS standalone PWAs can't window.open blob URLs or trigger downloads;
 // the share sheet is the only reliable way to save a file there.
 async function shareOrDownloadBlob(blob: Blob, filename: string) {
@@ -676,7 +693,7 @@ export default function VehicleDetailPage() {
   const [specsForm, setSpecsForm] = useState<Record<string, string>>({});
 
   // Form state
-  const [fuelForm, setFuelForm] = useState({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '', missed_fillup: false });
+  const [fuelForm, setFuelForm] = useState(initialFuelForm);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [customServiceTypes, setCustomServiceTypes] = useState<string[]>(() =>
     JSON.parse(localStorage.getItem('customServiceTypes') || '[]')
@@ -746,6 +763,11 @@ export default function VehicleDetailPage() {
   const loadParts = useCallback(async () => {
     setParts(await apiClient.listParts(id));
   }, [id]);
+
+  const searchPartOnAmazon = (p: VehiclePart) => {
+    const query = [p.part_number, p.name].filter(Boolean).join(' ');
+    window.open(`https://www.amazon.com/s?k=${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer');
+  };
 
   const loadPhotos = useCallback(async () => {
     const photos: VehiclePhoto[] = await apiClient.listVehiclePhotos(id);
@@ -831,9 +853,15 @@ export default function VehicleDetailPage() {
 
   const openFuelAdd = () => {
     setEditFuel(null);
-    setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '', missed_fillup: false });
+    setFuelForm(initialFuelForm());
+    setMpgAnomalyAck('');
     setFormError('');
     setFuelModal(true);
+  };
+
+  const closeFuelModal = () => {
+    setFuelModal(false);
+    setMpgAnomalyAck('');
   };
 
   useEffect(() => {
@@ -841,7 +869,8 @@ export default function VehicleDetailPage() {
     const tab = searchParams.get('tab');
     if (tab === 'fuel') {
       setEditFuel(null);
-      setFuelForm({ date: today(), mileage: 0, gallons: 0, cost: 0, location: '', notes: '', octane: '', missed_fillup: false });
+      setFuelForm(initialFuelForm());
+      setMpgAnomalyAck('');
       setFormError('');
       setFuelModal(true);
     } else if (tab === 'maintenance') {
@@ -857,7 +886,8 @@ export default function VehicleDetailPage() {
 
   const openFuelEdit = (e: FuelEntry) => {
     setEditFuel(e);
-    setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '', octane: e.octane ? String(e.octane) : '', missed_fillup: e.missed_fillup ?? false });
+    setFuelForm({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, location: e.location || '', notes: e.notes || '', octane: e.octane ? String(e.octane) : '', missed_fillup: e.missed_fillup ?? false, partial_fillup: e.partial_fillup ?? false });
+    setMpgAnomalyAck('');
     setFormError('');
     setFuelModal(true);
   };
@@ -875,14 +905,18 @@ export default function VehicleDetailPage() {
       notes: fuelForm.notes || undefined,
       octane: fuelForm.octane ? Number(fuelForm.octane) : undefined,
       missed_fillup: fuelForm.missed_fillup,
+      partial_fillup: fuelForm.partial_fillup,
     };
     // Sanity-check the implied MPG against the vehicle's average — usually a
     // typo'd odometer or gallons, occasionally something worth knowing about
-    if (!editFuel && !payload.missed_fillup && fuelEntries.length >= 3 && payload.gallons > 0) {
-      const prev = fuelEntries[0];
+    if (!editFuel && !payload.missed_fillup && !payload.partial_fillup && fuelEntries.length >= 3 && payload.gallons > 0) {
+      const previousFullIndex = fuelEntries.findIndex((entry) => !entry.partial_fillup);
+      const prev = previousFullIndex >= 0 ? fuelEntries[previousFullIndex] : null;
+      const partials = previousFullIndex >= 0 ? fuelEntries.slice(0, previousFullIndex) : [];
       const ackKey = `${payload.mileage}|${payload.gallons}`;
-      if (prev && payload.mileage > prev.mileage && mpgAnomalyAck !== ackKey) {
-        const entryMpg = (payload.mileage - prev.mileage) / payload.gallons;
+      if (prev && !partials.some((entry) => entry.missed_fillup) && payload.mileage > prev.mileage && mpgAnomalyAck !== ackKey) {
+        const intervalGallons = payload.gallons + partials.reduce((sum, entry) => sum + Number(entry.gallons), 0);
+        const entryMpg = (payload.mileage - prev.mileage) / intervalGallons;
         const mpgs = fuelEntries.filter((f) => f.mpg != null).map((f) => Number(f.mpg));
         const avg = mpgs.length ? mpgs.reduce((a, b) => a + b, 0) / mpgs.length : null;
         if (avg && (entryMpg > avg * 1.3 || entryMpg < avg * 0.7)) {
@@ -899,14 +933,14 @@ export default function VehicleDetailPage() {
       } else {
         await apiClient.createFuelEntry(id, payload);
       }
-      setFuelModal(false);
+      closeFuelModal();
       loadFuel().catch(console.error);
       addToast('success', editFuel ? 'Fuel entry updated' : 'Fill-up logged');
     } catch (err: any) {
       if (!editFuel && !err.response) {
         // No connectivity (e.g. at the pump) — queue locally and sync later
         apiClient.queueFuelEntry(id, payload);
-        setFuelModal(false);
+        closeFuelModal();
         addToast('info', 'Offline — fill-up saved on this device and will sync when you\'re back online');
       } else {
         setFormError(err.response?.data?.detail || 'Failed to save');
@@ -1906,18 +1940,20 @@ export default function VehicleDetailPage() {
             <div className="flex gap-2">
               {fuelEntries.length > 0 && (
                 <>
-                  <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, mpg: e.mpg ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
+                  <button onClick={() => downloadCSV(fuelEntries.map((e) => ({ date: e.date, mileage: e.mileage, gallons: e.gallons, cost: e.cost, partial_fillup: e.partial_fillup ?? false, missed_fillup: e.missed_fillup ?? false, mpg: e.mpg ?? '', location: e.location ?? '', notes: e.notes ?? '' })), 'fuel-history.csv')} className="btn-secondary text-sm">Export CSV</button>
                   <label className="btn-secondary text-sm cursor-pointer">
                     Import CSV
                     <input type="file" accept=".csv" className="hidden" onChange={async (ev) => {
                       const file = ev.target.files?.[0]; ev.target.value = '';
                       if (!file) return;
                       const text = await file.text();
-                      const rows = parseCSV(text);
+                      const rows = parseCSV(text).sort((a, b) =>
+                        a.date.localeCompare(b.date) || Number(a.mileage) - Number(b.mileage)
+                      );
                       let ok = 0; let fail = 0;
                       for (const r of rows) {
                         try {
-                          await apiClient.createFuelEntry(id, { date: r.date, mileage: Number(r.mileage), gallons: Number(r.gallons), cost: Number(r.cost), location: r.location || undefined, notes: r.notes || undefined, octane: r.octane ? Number(r.octane) : undefined });
+                          await apiClient.createFuelEntry(id, { date: r.date, mileage: Number(r.mileage), gallons: Number(r.gallons), cost: Number(r.cost), location: r.location || undefined, notes: r.notes || undefined, octane: r.octane ? Number(r.octane) : undefined, partial_fillup: r.partial_fillup === 'true', missed_fillup: r.missed_fillup === 'true' });
                           ok++;
                         } catch { fail++; }
                       }
@@ -2010,9 +2046,7 @@ export default function VehicleDetailPage() {
                       <td className="px-4 py-3 text-slate-300">${Number(e.cost).toFixed(2)}</td>
                       <td className="px-4 py-3 text-slate-400">${(e.cost / e.gallons).toFixed(3)}</td>
                       <td className="px-4 py-3 text-slate-300">
-                        {e.missed_fillup
-                          ? <span className="text-xs px-2 py-0.5 rounded font-medium bg-amber-900/50 text-amber-300" title="Missed fill-up — MPG not computable for this interval">missed</span>
-                          : e.mpg != null ? Number(e.mpg).toFixed(1) : '—'}
+                        <FuelEconomyValue entry={e} />
                       </td>
                       {vehicle.fuel_type !== 'diesel' && vehicle.fuel_type !== 'electric' && (
                         <td className="px-4 py-3 text-slate-300">{e.octane ? `${e.octane}` : '—'}</td>
@@ -2042,7 +2076,7 @@ export default function VehicleDetailPage() {
             </>
           )}
 
-          <Modal isOpen={fuelModal} onClose={() => setFuelModal(false)} title={editFuel ? 'Edit Fuel Entry' : 'Log Fill-up'}>
+          <Modal isOpen={fuelModal} onClose={closeFuelModal} title={editFuel ? 'Edit Fuel Entry' : 'Log Fill-up'}>
             <form onSubmit={saveFuel} className="space-y-4">
               <div className="flex items-center justify-between">
                 <FormError msg={formError} />
@@ -2124,6 +2158,11 @@ export default function VehicleDetailPage() {
                 </div>
               )}
               <label className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={fuelForm.partial_fillup}
+                  onChange={(e) => setFuelForm((p) => ({ ...p, partial_fillup: e.target.checked }))} />
+                <span>Partial fill-up <span className="block text-xs text-slate-500">The tank is not full — calculate MPG after the next full fill-up</span></span>
+              </label>
+              <label className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
                 <input type="checkbox" className="mt-0.5" checked={fuelForm.missed_fillup}
                   onChange={(e) => setFuelForm((p) => ({ ...p, missed_fillup: e.target.checked }))} />
                 <span>Missed a fill-up since my last entry <span className="block text-xs text-slate-500">Someone else filled the tank without logging it — skip MPG for this entry</span></span>
@@ -2132,7 +2171,7 @@ export default function VehicleDetailPage() {
                 <button type="submit" disabled={saving} className="btn-primary flex-1">
                   {saving ? 'Saving...' : 'Save'}
                 </button>
-                <button type="button" onClick={() => setFuelModal(false)} className="btn-secondary flex-1">
+                <button type="button" onClick={closeFuelModal} className="btn-secondary flex-1">
                   Cancel
                 </button>
               </div>
@@ -2856,7 +2895,15 @@ export default function VehicleDetailPage() {
                         <div className="min-w-0 flex-1">
                           <span className="text-white font-medium">{p.name}</span>
                           {p.brand && <span className="text-slate-400 ml-2">{p.brand}</span>}
-                          {p.part_number && <span className="font-mono text-teal-300 ml-2">#{p.part_number}</span>}
+                          {p.part_number && (
+                            <button
+                              onClick={() => searchPartOnAmazon(p)}
+                              title="Search this part on Amazon"
+                              className="font-mono text-teal-300 hover:text-teal-200 hover:underline ml-2 transition-colors"
+                            >
+                              #{p.part_number}
+                            </button>
+                          )}
                           {p.order_status === 'ordered' && <span className="ml-2 text-xs bg-teal-900/40 text-teal-400 border border-teal-700/50 px-1.5 py-0.5 rounded">Ordered</span>}
                         </div>
                         <div className="flex gap-2 flex-shrink-0">
@@ -2900,7 +2947,15 @@ export default function VehicleDetailPage() {
                             </div>
                             <div className="flex flex-wrap gap-3 mt-0.5 text-slate-400">
                               {p.brand && <span>{p.brand}</span>}
-                              {p.part_number && <span className="font-mono text-teal-300">#{p.part_number}</span>}
+                              {p.part_number && (
+                                <button
+                                  onClick={() => searchPartOnAmazon(p)}
+                                  title="Search this part on Amazon"
+                                  className="font-mono text-teal-300 hover:text-teal-200 hover:underline transition-colors"
+                                >
+                                  #{p.part_number}
+                                </button>
+                              )}
                               {p.notes && <span className="italic">{p.notes}</span>}
                             </div>
                           </div>

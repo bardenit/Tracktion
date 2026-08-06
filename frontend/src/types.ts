@@ -26,6 +26,7 @@ export interface FuelEntry {
   notes?: string;
   octane?: number;
   missed_fillup?: boolean;
+  partial_fillup?: boolean;
   mpg?: number;
   cost_per_mile?: number;
 }
