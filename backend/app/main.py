@@ -48,6 +48,40 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+class StrippedSlashMiddleware:
+    """Serve collection routes when an upstream proxy drops the trailing slash.
+
+    Cloudflare rewrites `/api/vehicles/` to `/api/vehicles` before the request
+    reaches this application. Starlette would answer with a 307 to the slashed
+    path, which the edge strips again on the way back, so the redirect can never
+    be satisfied and the browser gives up. Rewrite the path in place instead,
+    but only when the slashed variant is a route this application actually
+    serves, so unknown paths still reach the normal 404.
+    """
+
+    def __init__(self, app, routes):
+        self.app = app
+        self.routes = routes
+        self._slashed_paths = None
+
+    def slashed_paths(self):
+        if self._slashed_paths is None:
+            self._slashed_paths = {
+                route.path
+                for route in self.routes
+                if getattr(route, "path", "").endswith("/") and route.path != "/"
+            }
+        return self._slashed_paths
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path and not path.endswith("/") and f"{path}/" in self.slashed_paths():
+                scope = dict(scope)
+                scope["path"] = f"{path}/"
+        await self.app(scope, receive, send)
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -78,6 +112,8 @@ app.include_router(settings_router.router, prefix="/api/settings", tags=["settin
 app.include_router(ocr.router, prefix="/api/ocr", tags=["ocr"])
 app.include_router(inspection.router, prefix="/api/inspection", tags=["inspection"])
 app.include_router(tires.router, prefix="/api/tires", tags=["tires"])
+
+app.add_middleware(StrippedSlashMiddleware, routes=app.routes)
 
 
 @app.get("/health")
