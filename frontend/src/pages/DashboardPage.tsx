@@ -113,17 +113,27 @@ export default function DashboardPage() {
 
   const loadVehicleData = useCallback(async (vehicle: Vehicle) => {
     setCardData((prev) => ({ ...prev, [vehicle.id]: { ...(prev[vehicle.id] ?? { fuelStats: null, reminders: [], expenses: [], costs: null, recallStatus: null }), loading: true } }));
+    // Recall status is served from a server-side cache and refreshed in the
+    // background, so it is fetched off the critical path and merged in late
+    // rather than gating the card.
+    if (vehicle.vehicle_type !== 'trailer') {
+      apiClient.getRecallStatus(vehicle.id)
+        .then((recallStatus) => {
+          setCardData((prev) => (prev[vehicle.id] ? { ...prev, [vehicle.id]: { ...prev[vehicle.id], recallStatus } } : prev));
+        })
+        .catch(() => {});
+    }
+
     try {
-      const [reminders, expenses, fuelStats, costs, recallStatus] = await Promise.all([
+      const [reminders, expenses, fuelStats, costs] = await Promise.all([
         apiClient.listMaintenanceReminders(vehicle.id),
         apiClient.listExpenses(vehicle.id),
         vehicle.vehicle_type !== 'trailer' ? apiClient.getFuelStats(vehicle.id) : Promise.resolve(null),
         vehicle.vehicle_type !== 'trailer' ? apiClient.getVehicleCosts(vehicle.id).catch(() => null) : Promise.resolve(null),
-        vehicle.vehicle_type !== 'trailer' ? apiClient.getRecallStatus(vehicle.id).catch(() => null) : Promise.resolve(null),
       ]);
-      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats, reminders, expenses, costs, recallStatus, loading: false } }));
+      setCardData((prev) => ({ ...prev, [vehicle.id]: { ...prev[vehicle.id], fuelStats, reminders, expenses, costs, loading: false } }));
     } catch {
-      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], costs: null, recallStatus: null, loading: false } }));
+      setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], costs: null, recallStatus: prev[vehicle.id]?.recallStatus ?? null, loading: false } }));
     }
   }, []);
 
