@@ -245,12 +245,26 @@ class MaintenanceEntryResponse(BaseModel):
 
 
 # Expense Schemas
+EXPENSE_CATEGORIES = ("insurance", "registration", "repair", "fuel", "other")
+
+
 class ExpenseCreate(BaseModel):
-    category: str = Field(..., max_length=100)
+    # The column is String(50) and the permitted values previously lived only in
+    # a comment, so any string at all could be stored and break grouping later.
+    category: str = Field(..., max_length=50)
     amount: float
     date: date
     description: str = Field(..., max_length=500)
     expires_on: Optional[date] = None
+
+    @field_validator('category')
+    @classmethod
+    def normalise_category(cls, v: str) -> str:
+        # Only trimmed and lower-cased. NOT restricted to EXPENSE_CATEGORIES:
+        # users define their own categories in the expense form, and rewriting
+        # them would silently discard that. The enum constrains what the OCR
+        # model may return (see ocr_validation), not what a user may type.
+        return (v or "").strip().lower()
 
 
 class ExpenseResponse(BaseModel):
@@ -470,13 +484,61 @@ class StorageSettingsResponse(BaseModel):
     has_access_key: bool = False
 
 
-class IntegrationsSettings(BaseModel):
-    anthropic_api_key: Optional[str] = None
+class OcrProviderConfig(BaseModel):
+    id: str = Field(..., max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    type: Literal["ollama", "anthropic", "openai"]
+    label: str = Field(..., max_length=80)
+    model: str = Field(..., max_length=120)
+    base_url: Optional[str] = Field(None, max_length=255)
+    # Blank on save means "leave the stored key alone", so a masked round-trip
+    # through the UI never clears a key that was already configured.
+    api_key: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('base_url')
+    @classmethod
+    def clean_base_url(cls, v: Optional[str]) -> Optional[str]:
+        return (v or "").strip().rstrip("/") or None
 
 
-class IntegrationsSettingsResponse(BaseModel):
-    anthropic_api_key_set: bool
-    anthropic_api_key_preview: Optional[str] = None
+class OcrProviderResponse(BaseModel):
+    id: str
+    type: str
+    label: str
+    model: str
+    base_url: Optional[str] = None
+    api_key_set: bool = False
+    api_key_preview: Optional[str] = None
+
+
+class OcrSettings(BaseModel):
+    active: str = Field(..., max_length=64)
+    providers: List[OcrProviderConfig]
+
+    @field_validator('providers')
+    @classmethod
+    def validate_providers(cls, v: List[OcrProviderConfig]) -> List[OcrProviderConfig]:
+        if not v:
+            raise ValueError("At least one OCR provider is required.")
+        ids = [p.id for p in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Provider ids must be unique.")
+        for p in v:
+            if p.type in ("ollama", "openai") and not p.base_url:
+                raise ValueError(f"{p.label} needs a base URL.")
+        return v
+
+
+class OcrSettingsResponse(BaseModel):
+    active: str
+    providers: List[OcrProviderResponse]
+
+
+class OcrActiveProvider(BaseModel):
+    id: str = Field(..., max_length=64)
+
+
+class OcrProviderTest(BaseModel):
+    id: Optional[str] = Field(None, max_length=64)
 
 
 # Inspection Schemas

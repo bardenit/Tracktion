@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiClient } from '../services/api';
+import { apiClient, confirmOcrFallback, ocrErrorMessage } from '../services/api';
 import Modal from '../components/Modal';
 import VehiclePhoto from '../components/VehiclePhoto';
 import type { Vehicle } from '../types';
@@ -46,14 +46,14 @@ export default function VehiclesPage() {
     setVinScanning(true);
     setError('');
     try {
-      const result = await apiClient.ocrVin(file);
+      const result = await apiClient.ocrVin(file, { onProviderUnreachable: confirmOcrFallback });
       setForm((prev) => ({ ...prev, vin: result.vin }));
       setVinLookupDone(false);
       if (!result.check_digit_ok) {
         setError('VIN read but its check digit looks off — verify it against the sticker before looking it up.');
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Could not read a VIN from that photo — try a closer shot of the sticker.');
+      setError(ocrErrorMessage(err, 'Could not read a VIN from that photo — try a closer shot of the sticker.'));
     } finally {
       setVinScanning(false);
     }
@@ -290,7 +290,11 @@ export default function VehiclesPage() {
                   }}
                   maxLength={17}
                 />
-                <label className={`btn-secondary px-3 whitespace-nowrap cursor-pointer flex items-center ${vinScanning ? 'opacity-50 pointer-events-none' : ''}`}>
+                {/* onClick warms the model while the camera is open — fire-and-forget */}
+                <label
+                  className={`btn-secondary px-3 whitespace-nowrap cursor-pointer flex items-center ${vinScanning ? 'opacity-50 pointer-events-none' : ''}`}
+                  onClick={() => { apiClient.preloadOcr().catch(() => {}); }}
+                >
                   {vinScanning ? 'Reading…' : '📷 Scan'}
                   <input
                     type="file"

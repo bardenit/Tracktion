@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
 import { apiClient } from '../services/api';
+import type { OcrProvider, OcrProviderType } from '../services/api';
 
 type Tab = 'account' | 'database' | 'storage' | 'integrations';
 type DbType = 'sqlite' | 'postgresql' | 'mysql';
@@ -56,11 +57,11 @@ export default function SettingsPage() {
   const [storageStatus, setStorageStatus] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
   const [storageMigration, setStorageMigration] = useState<{ id: number; state: string; total?: number; verified?: number } | null>(null);
 
-  // ── Integrations ──────────────────────────────────────────────────────────
-  const [anthropicKey, setAnthropicKey] = useState('');
-  const [anthropicKeySet, setAnthropicKeySet] = useState(false);
-  const [anthropicKeyPreview, setAnthropicKeyPreview] = useState<string | null>(null);
+  // ── Integrations: OCR providers ───────────────────────────────────────────
+  const [ocrProviders, setOcrProviders] = useState<OcrProvider[]>([]);
+  const [ocrActive, setOcrActive] = useState('');
   const [intLoading, setIntLoading] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
   const [intStatus, setIntStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   useEffect(() => {
@@ -96,8 +97,8 @@ export default function SettingsPage() {
     }
     if (activeTab === 'integrations') {
       apiClient.getIntegrationsSettings().then((s) => {
-        setAnthropicKeySet(s.anthropic_api_key_set || false);
-        setAnthropicKeyPreview(s.anthropic_api_key_preview || null);
+        setOcrProviders(s.providers || []);
+        setOcrActive(s.active || '');
       }).catch(() => {});
     }
   }, [activeTab]);
@@ -236,27 +237,55 @@ export default function SettingsPage() {
     } catch (err: any) { setStorageStatus({ type: 'error', msg: err.response?.data?.detail || 'Status check failed' }); }
   };
 
-  const handleTestIntegrations = async () => {
-    setIntLoading(true); setIntStatus(null);
+  const reloadIntegrations = async () => {
+    const s = await apiClient.getIntegrationsSettings();
+    setOcrProviders(s.providers || []);
+    setOcrActive(s.active || '');
+  };
+
+  const updateProvider = (id: string, patch: Partial<OcrProvider>) => {
+    setOcrProviders((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  };
+
+  const addProvider = (type: OcrProviderType) => {
+    let n = 1;
+    while (ocrProviders.some((p) => p.id === `${type}-${n}`)) n += 1;
+    const defaults: Record<OcrProviderType, Partial<OcrProvider>> = {
+      ollama: { label: 'Ollama', model: 'qwen3.5:4b', base_url: 'http://10.10.10.10:11434' },
+      anthropic: { label: 'Anthropic', model: 'claude-sonnet-5', base_url: '' },
+      openai: { label: 'OpenAI-compatible', model: '', base_url: '' },
+    };
+    setOcrProviders((prev) => [...prev, { id: `${type}-${n}`, type, label: '', model: '', ...defaults[type] } as OcrProvider]);
+  };
+
+  const removeProvider = (id: string) => {
+    setOcrProviders((prev) => prev.filter((p) => p.id !== id));
+    if (ocrActive === id) setOcrActive('');
+  };
+
+  const handleTestProvider = async (id: string) => {
+    setTestingId(id); setIntStatus(null);
     try {
-      const r = await apiClient.testIntegrationsSettings(anthropicKey || undefined);
-      setIntStatus(r.success ? { type: 'success', msg: 'API key is valid!' } : { type: 'error', msg: r.error || 'Invalid API key' });
+      const r = await apiClient.testIntegrationsSettings(id);
+      setIntStatus(r.success
+        ? { type: 'success', msg: r.detail ? `Reachable — ${r.detail}` : 'Reachable' }
+        : { type: 'error', msg: r.error || 'Test failed' });
     } catch { setIntStatus({ type: 'error', msg: 'Test request failed' }); }
-    finally { setIntLoading(false); }
+    finally { setTestingId(null); }
   };
 
   const handleSaveIntegrations = async () => {
     setIntLoading(true); setIntStatus(null);
     try {
-      await apiClient.saveIntegrationsSettings({ anthropic_api_key: anthropicKey || undefined });
-      setAnthropicKeySet(!!anthropicKey || anthropicKeySet);
-      setAnthropicKey('');
-      addToast('success', 'Integration settings saved');
-      const s = await apiClient.getIntegrationsSettings();
-      setAnthropicKeySet(s.anthropic_api_key_set);
-      setAnthropicKeyPreview(s.anthropic_api_key_preview);
-    } catch (err: any) { setIntStatus({ type: 'error', msg: err.response?.data?.detail || 'Save failed' }); }
-    finally { setIntLoading(false); }
+      await apiClient.saveIntegrationsSettings({ active: ocrActive, providers: ocrProviders });
+      addToast('success', 'OCR provider settings saved');
+      await reloadIntegrations();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? (detail[0]?.msg || 'Save failed')
+        : (typeof detail === 'string' ? detail : 'Save failed');
+      setIntStatus({ type: 'error', msg });
+    } finally { setIntLoading(false); }
   };
 
   const tabs: { id: Tab; label: string }[] = [
@@ -592,65 +621,94 @@ export default function SettingsPage() {
 
       {/* ── INTEGRATIONS ── */}
       {activeTab === 'integrations' && (
-        <div className="card max-w-lg space-y-5">
+        <div className="card max-w-2xl space-y-5">
           <div>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Anthropic API</h2>
-            {anthropicKeySet ? (
-              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-2 text-sm mb-2">
-                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                <span className="text-slate-300">
-                  <span className="text-slate-400">Active: </span>
-                  <span className="text-white font-medium">Anthropic API</span>
-                  {anthropicKeyPreview && <span className="text-slate-500 font-mono text-xs ml-2">{anthropicKeyPreview}</span>}
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-2 text-sm mb-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-                <span className="text-slate-400">Not configured — OCR features disabled</span>
-              </div>
-            )}
-            <p className="text-slate-500 text-xs">Required for OCR — scanning receipts and fuel pump screens to auto-fill forms.</p>
+            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">OCR Providers</h2>
+            <p className="text-xs text-slate-500">
+              Receipt and pump scanning. The active provider handles every scan; the others stay
+              configured so a scan can fall back if it is unreachable.
+            </p>
           </div>
 
           <div className="space-y-3">
-            <div>
-              <label className="block text-sm text-slate-300 mb-1">
-                API Key
-                {anthropicKeySet && anthropicKeyPreview && (
-                  <span className="ml-2 text-slate-500 text-xs">Current: <span className="font-mono text-teal-400">{anthropicKeyPreview}</span></span>
-                )}
-              </label>
-              <input
-                className="input-field font-mono text-sm"
-                type="password"
-                placeholder={anthropicKeySet ? 'Enter new key to replace' : 'sk-ant-...'}
-                value={anthropicKey}
-                onChange={(e) => setAnthropicKey(e.target.value)}
-              />
-            </div>
+            {ocrProviders.map((p) => (
+              <div key={p.id} className={`rounded border p-3 space-y-2 ${ocrActive === p.id ? 'border-teal-500 bg-slate-700/40' : 'border-slate-700'}`}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="ocr-active"
+                    checked={ocrActive === p.id}
+                    onChange={() => setOcrActive(p.id)}
+                    className="accent-teal-500"
+                    aria-label={`Use ${p.label || p.id}`}
+                  />
+                  <input
+                    className="input-field flex-1 py-1 text-sm"
+                    value={p.label}
+                    placeholder="Display name"
+                    onChange={(e) => updateProvider(p.id, { label: e.target.value })}
+                  />
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-slate-800 rounded px-2 py-1">{p.type}</span>
+                  <button type="button" onClick={() => removeProvider(p.id)}
+                    className="text-xs text-slate-500 hover:text-red-400 transition-colors px-1"
+                    aria-label={`Remove ${p.label || p.id}`}>Remove</button>
+                </div>
 
-            {anthropicKeySet && (
-              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-2 text-sm">
-                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                <span className="text-slate-300">API key configured — OCR features are available</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Model</label>
+                    <input className="input-field py-1 text-sm" value={p.model}
+                      placeholder={p.type === 'ollama' ? 'qwen3.5:4b' : 'model name'}
+                      onChange={(e) => updateProvider(p.id, { model: e.target.value })} />
+                  </div>
+                  {p.type !== 'anthropic' && (
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Base URL</label>
+                      <input className="input-field py-1 text-sm" value={p.base_url || ''}
+                        placeholder={p.type === 'ollama' ? 'http://10.10.10.10:11434' : 'http://host:port/v1'}
+                        onChange={(e) => updateProvider(p.id, { base_url: e.target.value })} />
+                    </div>
+                  )}
+                  {p.type !== 'ollama' && (
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">
+                        API key
+                        {p.api_key_set && p.api_key_preview && (
+                          <span className="ml-2 text-slate-500 font-mono">{p.api_key_preview}</span>
+                        )}
+                      </label>
+                      <input className="input-field py-1 text-sm" type="password"
+                        value={p.api_key || ''}
+                        placeholder={p.api_key_set ? 'Leave blank to keep current key' : 'sk-...'}
+                        onChange={(e) => updateProvider(p.id, { api_key: e.target.value })} />
+                    </div>
+                  )}
+                </div>
+
+                <button type="button" onClick={() => handleTestProvider(p.id)}
+                  disabled={testingId === p.id}
+                  className="btn-secondary text-xs py-1 px-3">
+                  {testingId === p.id ? 'Testing...' : 'Test'}
+                </button>
               </div>
-            )}
-
-            {intStatus && (
-              <div className={`p-3 rounded text-sm ${statusCls(intStatus.type)}`}>{intStatus.msg}</div>
-            )}
+            ))}
           </div>
 
-          <div className="flex gap-3">
-            <button onClick={handleTestIntegrations} disabled={intLoading || (!anthropicKey && !anthropicKeySet)} className="btn-secondary flex-1">
-              {intLoading ? 'Testing...' : 'Test Key'}
-            </button>
-            <button onClick={handleSaveIntegrations} disabled={intLoading || !anthropicKey} className="btn-primary flex-1">
-              {intLoading ? 'Saving...' : 'Save Key'}
-            </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => addProvider('ollama')} className="btn-secondary text-xs py-1 px-3">+ Ollama</button>
+            <button type="button" onClick={() => addProvider('anthropic')} className="btn-secondary text-xs py-1 px-3">+ Anthropic</button>
+            <button type="button" onClick={() => addProvider('openai')} className="btn-secondary text-xs py-1 px-3">+ OpenAI-compatible</button>
           </div>
 
+          {intStatus && (
+            <div className={`text-sm rounded px-3 py-2 ${intStatus.type === 'success' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+              {intStatus.msg}
+            </div>
+          )}
+
+          <button onClick={handleSaveIntegrations} disabled={intLoading || !ocrActive} className="btn-primary w-full">
+            {intLoading ? 'Saving...' : 'Save Providers'}
+          </button>
         </div>
       )}
     </div>

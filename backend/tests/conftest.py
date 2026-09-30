@@ -76,3 +76,28 @@ def app_client(db_session, seeded_objects):
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
+
+@pytest.fixture
+def admin_client(db_session, seeded_objects):
+    """Like app_client, but the current user also satisfies require_admin."""
+    from app.auth import get_current_user
+    from app.database import get_db
+    from app.deps import require_admin
+    from app.main import app
+    from app.migrations import upgrade_database
+
+    owner, _, _ = seeded_objects
+    owner.is_admin = True
+    db_session.commit()
+    upgrade_database(os.environ["DATABASE_URL"])
+
+    def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = lambda: owner
+    app.dependency_overrides[require_admin] = lambda: owner
+    app.state.database_ready = True
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()

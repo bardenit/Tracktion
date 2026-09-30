@@ -32,17 +32,68 @@ def _storage_from_env() -> dict | None:
     return None
 
 
+DEFAULT_OLLAMA_URL = "http://10.10.10.10:11434"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
+
+
+def _seed_ocr_providers(anthropic_key: str) -> dict:
+    """Default provider list. Anthropic is included only if a key is already known,
+    so an existing install keeps working without reconfiguration."""
+    providers = [{
+        "id": "ollama-local",
+        "type": "ollama",
+        "label": "Local Ollama",
+        "base_url": DEFAULT_OLLAMA_URL,
+        "model": DEFAULT_OLLAMA_MODEL,
+        "api_key": "",
+    }]
+    if anthropic_key:
+        providers.append({
+            "id": "anthropic",
+            "type": "anthropic",
+            "label": "Anthropic",
+            "base_url": "",
+            "model": "claude-sonnet-5",
+            "api_key": anthropic_key,
+        })
+    return {"active": "ollama-local", "providers": providers}
+
+
 def _backfill_from_env(config: dict) -> dict:
     """Fill any missing sections from environment variables."""
     if "storage" not in config:
         env_storage = _storage_from_env()
         if env_storage:
             config["storage"] = env_storage
-    if "integrations" not in config:
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if key:
-            config["integrations"] = {"anthropic_api_key": key}
+    integrations = config.setdefault("integrations", {})
+    if "ocr" not in integrations:
+        # Migration path: the pre-provider shape stored a single Anthropic key.
+        key = integrations.get("anthropic_api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        integrations["ocr"] = _seed_ocr_providers(key)
     return config
+
+
+def get_ocr_settings() -> dict:
+    """Provider list and active selection, seeded on first read."""
+    return get_config().get("integrations", {}).get("ocr", _seed_ocr_providers(""))
+
+
+def get_ocr_provider(provider_id: str = "") -> dict:
+    """Resolve a provider config by id, defaulting to the active one.
+
+    The id is always resolved against stored config — a caller-supplied base URL
+    is never honoured, which keeps the OCR endpoints from becoming an SSRF
+    primitive against the internal network.
+    """
+    settings = get_ocr_settings()
+    providers = settings.get("providers", [])
+    wanted = provider_id or settings.get("active", "")
+    for provider in providers:
+        if provider.get("id") == wanted:
+            return provider
+    if provider_id:
+        return {}
+    return providers[0] if providers else {}
 
 
 def get_config() -> dict:

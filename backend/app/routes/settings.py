@@ -6,11 +6,15 @@ from app.deps import require_admin
 from app.models import User, StorageProfile
 from app.database import get_db
 from sqlalchemy.orm import Session
-from app.data_config import get_config, save_config, get_database_url
+from app.data_config import get_config, save_config, get_database_url, get_ocr_settings
 from app.schemas import (
     DBSettings, DBSettingsResponse,
     StorageSettings, StorageSettingsResponse,
-    IntegrationsSettings, IntegrationsSettingsResponse,
+    OcrSettings, OcrSettingsResponse, OcrProviderResponse,
+    OcrActiveProvider, OcrProviderTest,
+)
+from app.services.ocr_providers import (
+    ProviderError, ProviderUnreachable, build_provider,
 )
 
 
@@ -224,43 +228,88 @@ def _build_storage_config(configuration: dict):
     return storage_from_config(configuration)
 
 
-# ── Integrations ──────────────────────────────────────────────────────────────
+# ── Integrations: OCR providers ───────────────────────────────────────────────
 
-@router.get("/integrations", response_model=IntegrationsSettingsResponse)
+def _mask(key: str) -> str:
+    return f"...{key[-4:]}" if key else None
+
+
+def _to_response(provider: dict) -> OcrProviderResponse:
+    key = provider.get("api_key") or ""
+    return OcrProviderResponse(
+        id=provider.get("id", ""),
+        type=provider.get("type", ""),
+        label=provider.get("label", ""),
+        model=provider.get("model", ""),
+        base_url=provider.get("base_url") or None,
+        api_key_set=bool(key),
+        api_key_preview=_mask(key),
+    )
+
+
+@router.get("/integrations", response_model=OcrSettingsResponse)
 def get_integrations_settings(current_user: User = Depends(get_current_user)):
-    cfg = get_config().get("integrations", {})
-    key = cfg.get("anthropic_api_key", "")
-    return IntegrationsSettingsResponse(
-        anthropic_api_key_set=bool(key),
-        anthropic_api_key_preview=f"...{key[-4:]}" if key else None,
+    settings = get_ocr_settings()
+    return OcrSettingsResponse(
+        active=settings.get("active", ""),
+        providers=[_to_response(p) for p in settings.get("providers", [])],
     )
 
 
 @router.post("/integrations/test")
-def test_integrations(s: IntegrationsSettings = IntegrationsSettings(), current_user: User = Depends(get_current_user)):
-    key = s.anthropic_api_key or get_config().get("integrations", {}).get("anthropic_api_key", "")
-    if not key:
-        return {"success": False, "error": "No API key configured"}
+def test_integrations(s: OcrProviderTest = OcrProviderTest(), current_user: User = Depends(get_current_user)):
+    settings = get_ocr_settings()
+    wanted = s.id or settings.get("active", "")
+    cfg = next((p for p in settings.get("providers", []) if p.get("id") == wanted), None)
+    if not cfg:
+        return {"success": False, "error": "No such provider."}
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=key)
-        client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=10,
-            messages=[{"role": "user", "content": "Hi"}],
-        )
-        return {"success": True}
+        return build_provider(cfg).test()
+    except ProviderUnreachable as exc:
+        return {"success": False, "error": f"{exc.label} is unreachable."}
+    except ProviderError as exc:
+        return {"success": False, "error": str(exc)}
     except Exception:
-        logging.warning("Integration connection test failed")
-        return {"success": False, "error": "Connection failed. Check your API key and settings."}
+        logging.warning("OCR provider test failed", exc_info=True)
+        return {"success": False, "error": "Connection failed. Check the provider settings."}
 
 
 @router.post("/integrations")
-def save_integrations_settings(s: IntegrationsSettings, current_user: User = Depends(get_current_user)):
+def save_integrations_settings(s: OcrSettings, current_user: User = Depends(get_current_user)):
+    if not any(p.id == s.active for p in s.providers):
+        raise HTTPException(status_code=400, detail="The active provider is not in the list.")
+
     config = get_config()
-    existing = config.get("integrations", {})
-    config["integrations"] = {
-        "anthropic_api_key": s.anthropic_api_key or existing.get("anthropic_api_key", ""),
+    existing = {
+        p.get("id"): p.get("api_key", "")
+        for p in config.get("integrations", {}).get("ocr", {}).get("providers", [])
     }
+
+    providers = []
+    for p in s.providers:
+        # An empty key means unchanged: the UI only ever sees a masked preview,
+        # so submitting the form back must not wipe a stored secret.
+        key = p.api_key if p.api_key else existing.get(p.id, "")
+        providers.append({
+            "id": p.id,
+            "type": p.type,
+            "label": p.label,
+            "model": p.model,
+            "base_url": p.base_url or "",
+            "api_key": key,
+        })
+
+    config.setdefault("integrations", {})["ocr"] = {"active": s.active, "providers": providers}
     save_config(config)
-    return {"message": "Integration settings saved."}
+    return {"message": "OCR provider settings saved."}
+
+
+@router.post("/integrations/active")
+def set_active_provider(s: OcrActiveProvider, current_user: User = Depends(get_current_user)):
+    config = get_config()
+    ocr = config.setdefault("integrations", {}).setdefault("ocr", get_ocr_settings())
+    if not any(p.get("id") == s.id for p in ocr.get("providers", [])):
+        raise HTTPException(status_code=404, detail="No such provider.")
+    ocr["active"] = s.id
+    save_config(config)
+    return {"message": "Active OCR provider updated.", "active": s.id}

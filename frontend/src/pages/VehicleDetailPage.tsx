@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { apiClient } from '../services/api';
+import { apiClient, confirmOcrFallback, ocrErrorMessage } from '../services/api';
 import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';
 import { useAuthStore } from '../stores/authStore';
@@ -119,7 +119,12 @@ function ScanReceiptButton({ onScan }: { onScan: (file: File) => Promise<void> }
 
   return (
     <div className="flex items-center gap-2">
-      <button type="button" onClick={() => ref.current?.click()} disabled={scanning}
+      <button type="button" onClick={() => {
+        // Warm the model while the user picks a photo. Fire-and-forget: a
+        // failure here only means the scan itself pays the cold load.
+        apiClient.preloadOcr().catch(() => {});
+        ref.current?.click();
+      }} disabled={scanning}
         className="flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300 border border-teal-800 hover:border-teal-700 bg-teal-900/20 px-3 py-1.5 rounded transition-colors disabled:opacity-50">
         {scanning ? (
           <><span className="animate-spin inline-block">⟳</span> Scanning...</>
@@ -1418,7 +1423,7 @@ export default function VehicleDetailPage() {
 
   const maybeCreateExpiryExpense = async (file: File, type: string) => {
     try {
-      const res = await apiClient.ocrDocumentExpiry(file);
+      const res = await apiClient.ocrDocumentExpiry(file, { onProviderUnreachable: confirmOcrFallback });
       if (!res.expires_on) return;
       const label = res.description || (type === 'registration' ? 'Vehicle registration' : 'Insurance policy');
       if (!confirm(`Detected expiration ${res.expires_on} on this document.\n\nCreate an expiring expense ("${label}") so the dashboard warns you before it lapses?`)) return;
@@ -2055,15 +2060,25 @@ export default function VehicleDetailPage() {
                 <ScanReceiptButton onScan={async (file) => {
                   setFormError('');
                   try {
-                    const r = await apiClient.ocrFuel(file);
-                    if (r.date) setFuelForm((p) => ({ ...p, date: r.date }));
-                    if (r.gallons != null) setFuelForm((p) => ({ ...p, gallons: r.gallons }));
-                    if (r.cost != null) setFuelForm((p) => ({ ...p, cost: r.cost }));
-                    if (r.location) setFuelForm((p) => ({ ...p, location: r.location }));
-                    if (r.mileage != null) setFuelForm((p) => ({ ...p, mileage: r.mileage }));
-                    addToast('success', 'Receipt scanned — review and save');
+                    const r = await apiClient.ocrFuel(file, { onProviderUnreachable: confirmOcrFallback });
+                    // One patch, one render. Fields the scan could not read, or
+                    // that failed validation, are simply absent and left alone.
+                    const patch: Partial<typeof fuelForm> = {};
+                    if (r.date) patch.date = r.date;
+                    if (r.gallons != null) patch.gallons = r.gallons;
+                    if (r.cost != null) patch.cost = r.cost;
+                    if (r.location) patch.location = r.location;
+                    if (r.mileage != null) patch.mileage = r.mileage;
+                    setFuelForm((p) => ({ ...p, ...patch }));
+                    // Values that failed a sanity check are left blank on purpose.
+                    if (r.warnings?.length) {
+                      setFormError(r.warnings.join(' '));
+                      addToast('info', 'Scanned with warnings — check the highlighted values');
+                    } else {
+                      addToast('success', 'Receipt scanned — review and save');
+                    }
                   } catch (err: any) {
-                    setFormError(err.response?.data?.detail || 'Scan failed');
+                    setFormError(ocrErrorMessage(err));
                   }
                 }} />
               </div>
@@ -2650,14 +2665,21 @@ export default function VehicleDetailPage() {
                 <ScanReceiptButton onScan={async (file) => {
                   setFormError('');
                   try {
-                    const r = await apiClient.ocrExpense(file);
-                    if (r.date) setExpenseForm((p) => ({ ...p, date: r.date }));
-                    if (r.amount != null) setExpenseForm((p) => ({ ...p, amount: r.amount }));
-                    if (r.description) setExpenseForm((p) => ({ ...p, description: r.description }));
-                    if (r.category) setExpenseForm((p) => ({ ...p, category: r.category }));
-                    addToast('success', 'Receipt scanned — review and save');
+                    const r = await apiClient.ocrExpense(file, { onProviderUnreachable: confirmOcrFallback });
+                    const patch: Partial<typeof expenseForm> = {};
+                    if (r.date) patch.date = r.date;
+                    if (r.amount != null) patch.amount = r.amount;
+                    if (r.description) patch.description = r.description;
+                    if (r.category) patch.category = r.category;
+                    setExpenseForm((p) => ({ ...p, ...patch }));
+                    if (r.warnings?.length) {
+                      setFormError(r.warnings.join(' '));
+                      addToast('info', 'Scanned with warnings — check the highlighted values');
+                    } else {
+                      addToast('success', 'Receipt scanned — review and save');
+                    }
                   } catch (err: any) {
-                    setFormError(err.response?.data?.detail || 'Scan failed');
+                    setFormError(ocrErrorMessage(err));
                   }
                 }} />
               </div>

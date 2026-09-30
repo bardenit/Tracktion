@@ -24,6 +24,69 @@ export interface FuelImportEntry { date: string; mileage: number; gallons: numbe
 export interface MaintenanceImportEntry { date: string; mileage: number; type: string; cost: number; service_provider?: string; notes?: string }
 export interface ExpenseImportEntry { category: string; amount: number; date: string; description: string; expires_on?: string }
 
+// ── OCR providers ────────────────────────────────────────────────────────────
+
+export type OcrProviderType = 'ollama' | 'anthropic' | 'openai';
+
+export interface OcrProvider {
+  id: string;
+  type: OcrProviderType;
+  label: string;
+  model: string;
+  base_url?: string | null;
+  /** Never populated by the API; only set when submitting a new or changed key. */
+  api_key?: string;
+  api_key_set?: boolean;
+  api_key_preview?: string | null;
+}
+
+export interface OcrSettingsResponse { active: string; providers: OcrProvider[] }
+export interface OcrSettingsPayload { active: string; providers: OcrProvider[] }
+
+export interface OcrProviderRef { id: string; label: string }
+
+/** Asked when the active provider is unreachable. Resolve with a provider id to
+ *  retry, or null to give up. A photo is only sent elsewhere on an explicit yes. */
+export type OcrFallbackPrompt = (message: string, alternatives: OcrProviderRef[]) => Promise<string | null>;
+
+export interface OcrOptions {
+  provider?: string;
+  onProviderUnreachable?: OcrFallbackPrompt;
+}
+
+export interface OcrFuelResult {
+  cost?: number; gallons?: number; price_per_gallon?: number;
+  date?: string; location?: string; mileage?: number;
+  warnings: string[];
+}
+
+export interface OcrExpenseResult {
+  amount?: number; date?: string; description?: string; category?: string;
+  warnings: string[];
+}
+
+export interface OcrDocumentResult {
+  expires_on?: string; description?: string; category?: string; amount?: number;
+  warnings: string[];
+}
+
+/** The 503 fallback response carries an object detail, so rendering
+ *  `err.response.data.detail` straight into JSX would throw. */
+export function ocrErrorMessage(err: any, fallback = 'Scan failed'): string {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail.detail === 'string') return detail.detail;
+  return fallback;
+}
+
+/** Default confirmation for an unreachable provider. */
+export function confirmOcrFallback(message: string, alternatives: OcrProviderRef[]): Promise<string | null> {
+  const first = alternatives[0];
+  if (!first) return Promise.resolve(null);
+  const ok = confirm(`${message}\n\nRetry this scan with ${first.label}?`);
+  return Promise.resolve(ok ? first.id : null);
+}
+
 function resizeImageForUpload(
   file: File,
   maxDim: number,
@@ -421,60 +484,78 @@ class ApiClient {
     return response.data;
   }
 
-  async getIntegrationsSettings() {
+  async getIntegrationsSettings(): Promise<OcrSettingsResponse> {
     const response = await this.client.get('/settings/integrations');
     return response.data;
   }
 
-  async testIntegrationsSettings(key?: string) {
-    const response = await this.client.post('/settings/integrations/test', key ? { anthropic_api_key: key } : {});
+  async testIntegrationsSettings(id?: string) {
+    const response = await this.client.post('/settings/integrations/test', id ? { id } : {});
     return response.data;
   }
 
-  async saveIntegrationsSettings(settings: any) {
+  async saveIntegrationsSettings(settings: OcrSettingsPayload) {
     const response = await this.client.post('/settings/integrations', settings);
     return response.data;
   }
 
-  async ocrFuel(file: File) {
+  async setActiveOcrProvider(id: string) {
+    const response = await this.client.post('/settings/integrations/active', { id });
+    return response.data;
+  }
+
+  /** Warm the model so the next scan does not pay the cold load.
+   *  Fire-and-forget: a failure here only means the next scan is cold. */
+  async preloadOcr(provider?: string) {
+    const formData = new FormData();
+    formData.append('provider', provider || '');
+    await this.client.post('/ocr/preload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }
+
+  /** Posts an image to an OCR route, offering a configured alternative if the
+   *  active provider is unreachable. The retry sends a provider *id*, never a
+   *  URL — the backend resolves it against stored config. */
+  private async ocrPost(path: string, file: File, maxDim: number, quality: number, name: string, opts?: OcrOptions) {
+    const resized = await resizeImageForUpload(file, maxDim, quality, name);
+    const send = async (provider?: string) => {
+      const formData = new FormData();
+      formData.append('file', resized);
+      if (provider) formData.append('provider', provider);
+      const response = await this.client.post(path, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return response.data;
+    };
+    try {
+      return await send(opts?.provider);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const alternatives: OcrProviderRef[] = detail?.alternatives || [];
+      if (err?.response?.status !== 503 || !detail?.provider_unreachable) throw err;
+      if (!opts?.onProviderUnreachable || alternatives.length === 0) throw err;
+      const chosen = await opts.onProviderUnreachable(detail.detail || 'The OCR provider is unreachable.', alternatives);
+      if (!chosen) throw err;
+      return await send(chosen);
+    }
+  }
+
+  async ocrFuel(file: File, opts?: OcrOptions): Promise<OcrFuelResult> {
     // Keep pump digits legible — aggressive downscaling causes misread numbers
-    const resized = await resizeImageForUpload(file, 1600, 0.80, 'receipt.jpg');
-    const formData = new FormData();
-    formData.append('file', resized);
-    const response = await this.client.post('/ocr/fuel', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
+    return this.ocrPost('/ocr/fuel', file, 1600, 0.80, 'receipt.jpg', opts);
   }
 
-  async ocrExpense(file: File) {
-    const resized = await resizeImageForUpload(file, 1024, 0.70, 'receipt.jpg');
-    const formData = new FormData();
-    formData.append('file', resized);
-    const response = await this.client.post('/ocr/expense', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
+  async ocrExpense(file: File, opts?: OcrOptions): Promise<OcrExpenseResult> {
+    return this.ocrPost('/ocr/expense', file, 1024, 0.70, 'receipt.jpg', opts);
   }
 
-  async ocrVin(file: File): Promise<{ vin: string; check_digit_ok: boolean }> {
-    const resized = await resizeImageForUpload(file, 1600, 0.85, 'vin.jpg');
-    const formData = new FormData();
-    formData.append('file', resized);
-    const response = await this.client.post('/ocr/vin', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
+  async ocrVin(file: File, opts?: OcrOptions): Promise<{ vin: string; check_digit_ok: boolean }> {
+    return this.ocrPost('/ocr/vin', file, 1600, 0.85, 'vin.jpg', opts);
   }
 
-  async ocrDocumentExpiry(file: File): Promise<{ expires_on?: string; description?: string; category?: string; amount?: number }> {
-    const resized = await resizeImageForUpload(file, 1500, 0.78, 'document.jpg');
-    const formData = new FormData();
-    formData.append('file', resized);
-    const response = await this.client.post('/ocr/document-expiry', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
+  async ocrDocumentExpiry(file: File, opts?: OcrOptions): Promise<OcrDocumentResult> {
+    return this.ocrPost('/ocr/document-expiry', file, 1500, 0.78, 'document.jpg', opts);
   }
 
   // Fuel endpoints
