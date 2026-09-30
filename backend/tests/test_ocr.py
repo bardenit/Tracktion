@@ -374,6 +374,45 @@ def test_expense_create_keeps_a_custom_category():
 
 
 
+# ── Permissions ───────────────────────────────────────────────────────────────
+
+VEHICLE_PAYLOAD = {"make": "Honda", "model": "Civic", "year": 2020}
+
+
+def test_non_admin_can_scan(app_client, stub):
+    """A scan writes nothing — it returns extracted values for a form the user
+    may or may not be allowed to submit. Saving is gated per vehicle elsewhere."""
+    stub({"cost": "65.00", "gallons": "13.405"})
+    r = app_client.post("/api/ocr/fuel", files=_upload()["files"])
+    assert r.status_code == 200, r.text
+    assert r.json()["cost"] == 65.00
+
+
+def test_non_admin_can_preload(app_client, stub):
+    stub({})
+    assert app_client.post("/api/ocr/preload").status_code == 202
+
+
+def test_non_admin_cannot_create_a_vehicle(app_client):
+    r = app_client.post("/api/vehicles/", json=VEHICLE_PAYLOAD)
+    assert r.status_code == 403, r.text
+
+
+def test_admin_can_create_a_vehicle(admin_client):
+    r = admin_client.post("/api/vehicles/", json=VEHICLE_PAYLOAD)
+    assert r.status_code in (200, 201), r.text
+
+
+def test_non_admin_cannot_delete_a_vehicle(app_client, seeded_objects):
+    _, _, vehicle = seeded_objects
+    r = app_client.delete(f"/api/vehicles/{vehicle.id}")
+    assert r.status_code == 403, r.text
+
+
+def test_non_admin_cannot_read_ocr_provider_settings(app_client):
+    assert app_client.get("/api/settings/integrations").status_code == 403
+
+
 # ── Live, opt-in ──────────────────────────────────────────────────────────────
 
 LIVE = os.environ.get("TRACKTION_OCR_LIVE") == "1"

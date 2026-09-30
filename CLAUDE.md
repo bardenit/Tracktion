@@ -104,6 +104,32 @@ npm run build          # vite build
   `ExpenseCreate`; the enum applies only to what the OCR model may return.
 - OCR output is always an editable pre-fill the user confirms, never a silent write.
 
+## Permission model
+
+Two independent axes. Do not conflate them.
+
+**Account level** — `User.is_admin`, enforced by `require_admin` in `app/deps.py`:
+
+| Admin only | Any authenticated user |
+|---|---|
+| Create a vehicle (`vehicles.py` `create_vehicle`) | OCR scans, all four routes |
+| Delete a vehicle (admin **and** owner) | Everything gated per-vehicle below |
+| All of `routes/settings.py`, including OCR provider config | |
+
+**Per-vehicle level** — `VehicleCollaborator.role` (`viewer` / `editor`), enforced by
+`check_vehicle_access(..., require_write=True)` at 35 call sites. Editors write fuel,
+maintenance, expenses and the rest; viewers read.
+
+Consequences worth keeping in mind:
+
+- Since only admins create vehicles, a vehicle owner is always an admin. The owner check on
+  delete is still there for the case of a second admin.
+- OCR is deliberately **not** admin-gated: a scan extracts values and writes nothing. Saving
+  them goes through the fuel and expense routes, which enforce write access per vehicle. Gating
+  the scan would stop an editor filling in a form they are allowed to submit.
+- When an action is admin-only, hide the control in the UI rather than letting the user meet a
+  403 — see the Add Vehicle button in `VehiclesPage.tsx`.
+
 ## Reference
 
 - @CHANGES_OLLAMA_MIGRATION.md — OCR provider design, measured model accuracy, prompt and

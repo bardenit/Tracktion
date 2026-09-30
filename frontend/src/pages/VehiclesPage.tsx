@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient, confirmOcrFallback, ocrErrorMessage } from '../services/api';
+import { useAuthStore } from '../stores/authStore';
 import Modal from '../components/Modal';
 import VehiclePhoto from '../components/VehiclePhoto';
 import type { Vehicle } from '../types';
@@ -30,6 +31,7 @@ const blankForm = () => ({
 });
 
 export default function VehiclesPage() {
+  const user = useAuthStore((state) => state.user);
   const navigate = useNavigate();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,9 +176,12 @@ export default function VehiclesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Vehicles</h1>
-        <button onClick={openAdd} className="btn-primary">
-          + Add Vehicle
-        </button>
+        {/* Only admins may create vehicles; hide rather than show a 403. */}
+        {user?.is_admin && (
+          <button onClick={openAdd} className="btn-primary">
+            + Add Vehicle
+          </button>
+        )}
       </div>
 
       {vehicles.length === 0 ? (

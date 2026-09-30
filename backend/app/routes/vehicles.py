@@ -17,7 +17,7 @@ from app.schemas import (
     VehicleCollaboratorResponse,
 )
 from app.auth import get_current_user
-from app.deps import check_vehicle_access
+from app.deps import check_vehicle_access, require_admin
 from app.services.vin_decoder import decode_vin, extract_vin_data_for_storage
 from app.services.recalls import get_recalls, refresh_recall_cache
 from app.services.report import build_vehicle_report
@@ -29,7 +29,7 @@ router = APIRouter()
 @router.post("/", response_model=VehicleResponse)
 async def create_vehicle(
     vehicle_data: VehicleCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     nhtsa_data = None
@@ -131,7 +131,9 @@ async def update_vehicle(
 @router.delete("/{vehicle_id}")
 def delete_vehicle(
     vehicle_id: int,
-    current_user: User = Depends(get_current_user),
+    # Admin AND owner: only admins create vehicles, so an owner is always an
+    # admin, but the owner check still matters once there is a second admin.
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()

@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFil
 from starlette.concurrency import run_in_threadpool
 from app.auth import get_current_user
 from app.models import User
-from app.deps import require_admin
 from app.data_config import get_ocr_provider, get_ocr_settings
 from app.services import ocr_validation
 from app.services.ocr_providers import (
@@ -14,7 +13,10 @@ from app.services.ocr_providers import (
     build_provider,
 )
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+# Any authenticated user may scan. A scan extracts data and writes nothing;
+# saving it goes through the fuel and expense routes, which enforce write
+# access per vehicle. Configuring providers stays admin-only, in settings.
+router = APIRouter()
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
