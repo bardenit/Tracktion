@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
+import { useAuthStore } from '../stores/authStore';
 import VehiclePhoto from '../components/VehiclePhoto';
 import type { Vehicle, Reminder, Expense, VehicleCosts } from '../types';
 
@@ -99,6 +100,7 @@ function computeAlerts(vehicle: Vehicle, reminders: Reminder[], expenses: Expens
 }
 
 export default function DashboardPage() {
+  const user = useAuthStore((state) => state.user);
   const navigate = useNavigate();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [cardData, setCardData] = useState<Record<number, VehicleCardData>>({});
@@ -136,6 +138,16 @@ export default function DashboardPage() {
       setCardData((prev) => ({ ...prev, [vehicle.id]: { fuelStats: null, reminders: [], expenses: [], costs: null, recallStatus: prev[vehicle.id]?.recallStatus ?? null, loading: false } }));
     }
   }, []);
+
+  // Warm the OCR model on landing. It unloads after ten idle minutes, so
+  // loading it here means a scan started any time in the next ten minutes
+  // skips the cold load. Fire-and-forget: local inference, no per-call cost,
+  // and a failure only means the scan itself pays the load. Admin-only,
+  // because the OCR routes are — a non-admin would just collect a 403.
+  useEffect(() => {
+    if (!user?.is_admin) return;
+    apiClient.preloadOcr().catch(() => {});
+  }, [user?.is_admin]);
 
   useEffect(() => {
     apiClient.listVehicles()
