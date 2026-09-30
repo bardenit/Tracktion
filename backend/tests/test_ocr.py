@@ -100,6 +100,23 @@ def test_fuel_rejects_out_of_range_total():
     assert warnings
 
 
+def test_fuel_accepts_a_small_partial_fillup():
+    """Partial fills are a feature; a near-zero floor must not reject one."""
+    out, warnings = ocr_validation.clean_fuel({"cost": "7.00", "gallons": "2.000"})
+    assert out["cost"] == 7.00
+    assert out["gallons"] == 2.000
+    assert warnings == []
+
+
+def test_fuel_accepts_a_full_diesel_tank_at_todays_prices():
+    """36 gallon tank near $7/gal clears both the old $250 cost ceiling and the
+    old $7.00 price ceiling. Both would have rejected a legitimate fill."""
+    out, warnings = ocr_validation.clean_fuel({"cost": "255.60", "gallons": "36.000"})
+    assert out["cost"] == 255.60
+    assert out["gallons"] == 36.000
+    assert warnings == []
+
+
 def test_fuel_cannot_catch_a_plausible_fabrication():
     """Documents a known limit rather than asserting a fix.
 

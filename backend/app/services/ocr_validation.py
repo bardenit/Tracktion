@@ -13,9 +13,16 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Tuple
 
-FUEL_COST_RANGE = (Decimal("5"), Decimal("250"))
-FUEL_GALLONS_RANGE = (Decimal("1"), Decimal("45"))
-FUEL_PPG_RANGE = (Decimal("2"), Decimal("7"))
+# Floors are near-zero on purpose. A low floor catches a decimal shifted the
+# wrong way ($46.03 read as $4.60), but the derived price below catches that
+# case far better whenever both fields are readable — which is nearly always,
+# since they sit adjacent on the same display. A real floor would instead reject
+# legitimate partial fill-ups, which this app supports deliberately.
+FUEL_COST_RANGE = (Decimal("0.01"), Decimal("300"))
+FUEL_GALLONS_RANGE = (Decimal("0.01"), Decimal("60"))
+# Diesel runs near $7/gal as of late 2026, so a $7 ceiling would reject real
+# fills. This is the load-bearing check; keep it wide enough to stay usable.
+FUEL_PPG_RANGE = (Decimal("1.5"), Decimal("10"))
 PPG_TOLERANCE = Decimal("0.02")
 MILEAGE_RANGE = (Decimal("1"), Decimal("2000000"))
 

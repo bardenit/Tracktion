@@ -578,9 +578,19 @@ Both original prompts state sanity rules and ask the model to enforce them. Neit
 
 | Check | Rule | Catches |
 |-------|------|---------|
-| Cost range | `5.00 <= cost <= 250.00` | Magnitude errors, fabrications |
-| Gallons range | `1.0 <= gallons <= 45.0` | Decimal drop (`20542`), field swaps |
-| Derived price | `2.00 <= cost / gallons <= 7.00` | Everything the first two miss |
+| Cost range | `0.01 <= cost <= 300.00` | Magnitude errors, fabrications |
+| Gallons range | `0.01 <= gallons <= 60.0` | Decimal drop (`20542`), field swaps |
+| Derived price | `1.50 <= cost / gallons <= 10.00` | Everything the first two miss |
+
+Floors are near-zero deliberately. They were originally $5.00 and 1.0 gallon, ported from the old
+prompt's prose without re-deriving them. A floor's only unique catch is a decimal shifted the wrong
+way (`$46.03` read as `$4.60`), and the derived price catches that far better whenever both fields
+are readable — which is nearly always, since they sit adjacent on the display. What a real floor
+does reliably is reject legitimate partial fill-ups, which this app supports on purpose.
+
+The ceilings were also too tight for a diesel truck: a 36-gallon tank near $7/gal is $252, over the
+old $250 cost ceiling, and $7.00/gal sat exactly on the old price ceiling. Both would have rejected
+real fills.
 | Price consistency | If `price_per_gallon` is present, require `abs(ppg - cost/gallons) < 0.02`, else **drop the ppg field** and keep the rest | A fabricated `6.500` on a display showing no price (observed 1/10) |
 
 Against observed failures: `4603 / 12.545 = $367/gal` rejected, `20.0 / 20.0 = $1.00/gal` rejected (field swap), `195.00 / 5.000 = $39/gal` rejected.
