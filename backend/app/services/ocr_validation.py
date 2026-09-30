@@ -13,15 +13,17 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Tuple
 
-# Floors are near-zero on purpose. A low floor catches a decimal shifted the
-# wrong way ($46.03 read as $4.60), but the derived price below catches that
-# case far better whenever both fields are readable — which is nearly always,
-# since they sit adjacent on the same display. A real floor would instead reject
-# legitimate partial fill-ups, which this app supports deliberately.
-FUEL_COST_RANGE = (Decimal("0.01"), Decimal("300"))
-FUEL_GALLONS_RANGE = (Decimal("0.01"), Decimal("60"))
-# Diesel runs near $7/gal as of late 2026, so a $7 ceiling would reject real
-# fills. This is the load-bearing check; keep it wide enough to stay usable.
+# No lower bound on either value beyond being positive. A floor's only unique
+# catch is a decimal shifted the wrong way ($46.03 read as $4.60), which the
+# derived price below catches better whenever both fields are readable — and
+# they are adjacent on the display, so that is nearly always. What a floor does
+# reliably is reject small partial fill-ups, which this app supports on purpose.
+FUEL_COST_MAX = Decimal("300")
+FUEL_GALLONS_MAX = Decimal("60")
+# The price per gallon keeps a real range at both ends. Its lower bound is not a
+# floor on a reading but a ratio check: $20.00 for 20.000 gallons is $1.00/gal,
+# which is how a swapped pair of fields is detected. Diesel runs near $7/gal as
+# of late 2026, so the upper bound has to clear that to stay usable.
 FUEL_PPG_RANGE = (Decimal("1.5"), Decimal("10"))
 PPG_TOLERANCE = Decimal("0.02")
 MILEAGE_RANGE = (Decimal("1"), Decimal("2000000"))
@@ -63,6 +65,10 @@ def _in_range(value: Decimal, bounds: Tuple[Decimal, Decimal]) -> bool:
     return bounds[0] <= value <= bounds[1]
 
 
+def _positive_at_most(value: Decimal, maximum: Decimal) -> bool:
+    return value > 0 and value <= maximum
+
+
 def clean_fuel(raw: dict) -> Tuple[dict, list]:
     """Fuel route: cost and gallons must agree on a plausible price per gallon."""
     out, warnings = {}, []
@@ -70,10 +76,10 @@ def clean_fuel(raw: dict) -> Tuple[dict, list]:
     cost = _num(raw.get("cost"))
     gallons = _num(raw.get("gallons"))
 
-    if cost is not None and not _in_range(cost, FUEL_COST_RANGE):
+    if cost is not None and not _positive_at_most(cost, FUEL_COST_MAX):
         warnings.append(f"Ignored an implausible total of {cost}.")
         cost = None
-    if gallons is not None and not _in_range(gallons, FUEL_GALLONS_RANGE):
+    if gallons is not None and not _positive_at_most(gallons, FUEL_GALLONS_MAX):
         warnings.append(f"Ignored an implausible gallons reading of {gallons}.")
         gallons = None
 

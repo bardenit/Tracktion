@@ -101,11 +101,25 @@ def test_fuel_rejects_out_of_range_total():
 
 
 def test_fuel_accepts_a_small_partial_fillup():
-    """Partial fills are a feature; a near-zero floor must not reject one."""
+    """Partial fills are a feature; there is no lower bound beyond positive."""
     out, warnings = ocr_validation.clean_fuel({"cost": "7.00", "gallons": "2.000"})
     assert out["cost"] == 7.00
     assert out["gallons"] == 2.000
     assert warnings == []
+
+
+def test_fuel_accepts_a_one_gallon_splash():
+    out, warnings = ocr_validation.clean_fuel({"cost": "3.50", "gallons": "1.000"})
+    assert out["cost"] == 3.50
+    assert out["gallons"] == 1.000
+    assert warnings == []
+
+
+def test_fuel_rejects_zero_and_negative():
+    out, warnings = ocr_validation.clean_fuel({"cost": "0.00", "gallons": "5.000"})
+    assert "cost" not in out and warnings
+    out, warnings = ocr_validation.clean_fuel({"cost": "-5.00", "gallons": "5.000"})
+    assert "cost" not in out and warnings
 
 
 def test_fuel_accepts_a_full_diesel_tank_at_todays_prices():
