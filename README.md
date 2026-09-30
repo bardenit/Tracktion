@@ -176,11 +176,20 @@ docker-compose up -d
 3. Enable WAF rules for protection
 4. Configure rate limiting
 
+## OCR
+
+Photo extraction for fuel pumps and receipts, vehicle documents, and VINs. The provider is
+configurable in Settings → Integrations and defaults to a local Ollama host, so images stay on
+your own network. Anthropic and any OpenAI-compatible endpoint are also supported; if the active
+provider is unreachable, the app offers to retry with another rather than sending anything
+elsewhere silently.
+
+Extracted values always land in the form as an editable pre-fill for you to confirm — they are
+never saved automatically. See `CHANGES_OLLAMA_MIGRATION.md` for the measured accuracy behind the
+prompt and validation design.
+
 ## Phase 2 Features (Roadmap)
 
-- VIN OCR from windshield stickers (Claude Vision API)
-- Fuel pump OCR (Claude Vision API)
-- Receipt OCR (Claude Vision API)
 - License plate to VIN lookup
 - Better storage backends (S3, B2, MinIO)
 - User color preferences

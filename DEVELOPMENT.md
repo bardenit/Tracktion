@@ -214,7 +214,8 @@ id, vehicle_id, user_id, role (viewer/editor), created_at
 - [ ] Connect Cloudflare DNS
 
 ### Phase 2 (Polish)
-- [ ] Implement OCR (Claude Vision API) for VIN/fuel/receipts
+- [x] OCR for VIN, fuel, receipts and vehicle documents — pluggable providers
+      (Ollama by default, Anthropic, OpenAI-compatible), configured in Settings
 - [ ] License plate to VIN lookup
 - [ ] Better storage backends (S3, B2, MinIO)
 - [ ] Maintenance reminders & notifications

@@ -172,7 +172,6 @@ The frontend has placeholder pages. You'll want to build out:
 - Analytics charts (use Recharts - already in deps)
 
 **Priority 3 (Phase 2):**
-- OCR button (Claude Vision API integration)
 - Plate-to-VIN lookup
 - Better storage backends
 

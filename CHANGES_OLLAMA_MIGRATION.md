@@ -1,6 +1,16 @@
 # Plan: Pluggable OCR Providers, Ollama by Default
 
-**Status:** planned, not started. No code changed yet.
+**Status: implemented and deployed.** Backend, frontend, tests and images all shipped.
+
+What landed: provider adapters for Ollama / Anthropic / OpenAI-compatible with UI configuration
+and ask-before-fallback; the four measured prompts with their schemas; the validation layer in
+`app/services/ocr_validation.py`; model preloading on dashboard load and on the scan controls;
+640px fuel uploads; admin-only vehicle creation with OCR open to editors; and 100 backend tests
+where the OCR routes previously had none.
+
+Kept as the record of *why* each of those is shaped the way it is — the prompts and schemas are
+tuned against measured failure modes and small edits regress them. The sections below are written
+as a plan because that is what they were; read them as the reasoning, not as outstanding work.
 
 **Scope change, 2026-09-30:** this began as a straight replacement of Anthropic with a hardcoded Ollama host. It is now a provider abstraction — Ollama, Anthropic and any OpenAI-compatible endpoint, selectable and configurable from the Settings UI, with Ollama on the local host as the default. Anthropic stays as a configurable option rather than being removed, so OCR survives the Ollama box being offline. Sections written against the original premise have been revised; the accuracy work is unaffected and still applies to the default provider.
 
