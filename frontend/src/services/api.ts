@@ -542,8 +542,12 @@ class ApiClient {
   }
 
   async ocrFuel(file: File, opts?: OcrOptions): Promise<OcrFuelResult> {
-    // Keep pump digits legible — aggressive downscaling causes misread numbers
-    return this.ocrPost('/ocr/fuel', file, 1600, 0.80, 'receipt.jpg', opts);
+    // 640/0.65 measured against 1024, 1600 and 2048 from 12MP and 24MP
+    // originals: accuracy was indistinguishable, while the payload is ~7x
+    // smaller and inference ~2x faster. That matters on a phone over cellular.
+    // Only the OCR request is shrunk — uploadDocument keeps its own resize, so
+    // anything stored against the vehicle is unaffected.
+    return this.ocrPost('/ocr/fuel', file, 640, 0.65, 'receipt.jpg', opts);
   }
 
   async ocrExpense(file: File, opts?: OcrOptions): Promise<OcrExpenseResult> {

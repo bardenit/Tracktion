@@ -331,6 +331,35 @@ The schema is `{"vin": {"type": "string", "pattern": "^[A-HJ-NPR-Z0-9]{17}$"}}`,
 
 Three independent layers, and the VIN lands in an editable field the user confirms. This route already implements the pattern recommended for the other three — it should be the template, not a gap.
 
+### Upload resolution: more pixels bought nothing
+
+Measured from true camera originals (24 MP Costco pump, 12 MP Marathon glare pump), ten runs per
+setting, resized exactly as `resizeImageForUpload` does:
+
+| setting | both fields correct | payload, 2 photos | inference |
+|---------|--------------------|-------------------|-----------|
+| 640 / 0.65 | **19/20** | **76 KB** | ~840 ms |
+| 640 / 0.80 | 17/20 | 106 KB | ~895 ms |
+| 1024 / 0.80 | 14/20 | 243 KB | ~1140 ms |
+| 1600 / 0.80 (previous setting) | **19/20** | 540 KB | ~1630 ms |
+| 2048 / 0.80 | 19/20 | 837 KB | ~1960 ms |
+
+640 px matches 1600 px on accuracy at a seventh of the payload and half the inference time. The
+fuel route now uses 640/0.65.
+
+Read this as "no evidence more pixels help", not "fewer pixels are better". The glare photo scored
+10, 7, **4**, 9, 9 across those five settings — if resolution mattered monotonically, 1024 would
+not be the worst of them. Noise dominates at n=10 on a photo the model reads as a coin flip. What
+the data does support is that the extra 460 KB per scan was not earning anything.
+
+**Not generalised to the other routes, deliberately.** Both test photos are pump displays with
+large seven-segment digits. A parking or parts receipt is dense small print where glyphs occupy far
+fewer pixels, and a VIN is 17 small characters in a corner of the frame at 67% exact reads already.
+Those keep their existing resolutions until measured with originals of their own.
+
+**Stored documents are unaffected.** `uploadDocument` applies its own resize for the archived copy;
+the OCR request is resized separately from the same source file.
+
 ### What remains broken
 
 **Digit ambiguity under glare.** `64.00` vs `69.00` on the Marathon photo. This passes every arithmetic and range check that can be written — `64.00 / 20.542 = $3.11/gal` is a perfectly ordinary fuel price. No model setting, prompt change, or validation rule catches it. The reviewing human is the only control. This is the evidence behind the confirmation-step requirement below.
