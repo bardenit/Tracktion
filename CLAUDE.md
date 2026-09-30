@@ -20,6 +20,54 @@ If a frontend typecheck or build is needed outside a container, copy `package.js
 `tsconfig*.json`, `index.html` and `src/` to a local-disk scratch directory and run it there.
 Do not create `node_modules` in the repo.
 
+## Release: build and publish images
+
+Run this after any change that should reach the server. Do it every time a build is
+successfully updated.
+
+`docker-compose.yml` has **no `build:` sections** — it pulls `jbarden75/tracktion-backend:latest`
+and `jbarden75/tracktion-frontend:latest` from Docker Hub. So `docker-compose up --build` does
+nothing useful locally; the images must be built and pushed, and the Proxmox VM then pulls them.
+
+**Target is `linux/amd64` only.** The dev Mac is arm64, so a plain `docker build` produces an
+arm64 image that will not run on the VM. Always pass `--platform linux/amd64`.
+
+```bash
+# 1. build both, amd64, loaded into Docker Desktop
+docker buildx build --platform linux/amd64 -t jbarden75/tracktion-backend:latest  --load ./backend
+docker buildx build --platform linux/amd64 -t jbarden75/tracktion-frontend:latest --load ./frontend
+
+# 2. verify architecture before pushing
+docker image inspect jbarden75/tracktion-backend:latest  --format '{{.Os}}/{{.Architecture}}'
+docker image inspect jbarden75/tracktion-frontend:latest --format '{{.Os}}/{{.Architecture}}'
+# both must print linux/amd64
+
+# 3. smoke-test the backend image: migrations run and /health answers
+D=$(mktemp -d)
+docker run -d --rm --name tt-smoke --platform linux/amd64 \
+  -e DATA_DIR=/app/data -e JWT_SECRET_KEY=smoketest \
+  -v $D:/app/data -p 18000:8000 jbarden75/tracktion-backend:latest
+sleep 20 && curl -s http://127.0.0.1:18000/health    # {"status":"healthy","database":"ready"}
+docker logs tt-smoke | tail -5
+docker rm -f tt-smoke
+
+# 4. push
+docker push jbarden75/tracktion-backend:latest
+docker push jbarden75/tracktion-frontend:latest
+```
+
+Then pull and restart on the VM.
+
+Notes:
+
+- The build runs under emulation on Apple Silicon, so `pip install` and `npm install` are slow.
+  That is expected, not a hang.
+- `docker images` reports a buildx-loaded image's compressed size, so the backend shows ~116 MB
+  where a native build of the same Dockerfile shows ~505 MB. Not a truncated image; verify with
+  the smoke test rather than by size.
+- Pushing these tags replaces the previous multi-arch manifests with amd64-only. That is
+  deliberate — the VM is x86 — but nothing on arm64 can pull `:latest` afterwards.
+
 ## Tests
 
 Backend — no venv is committed; create one on local disk, not on the repo volume:
