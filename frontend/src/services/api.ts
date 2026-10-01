@@ -542,12 +542,19 @@ class ApiClient {
   }
 
   async ocrFuel(file: File, opts?: OcrOptions): Promise<OcrFuelResult> {
-    // 640/0.65 measured against 1024, 1600 and 2048 from 12MP and 24MP
-    // originals: accuracy was indistinguishable, while the payload is ~7x
-    // smaller and inference ~2x faster. That matters on a phone over cellular.
-    // Only the OCR request is shrunk — uploadDocument keeps its own resize, so
-    // anything stored against the vehicle is unaffected.
-    return this.ocrPost('/ocr/fuel', file, 640, 0.65, 'receipt.jpg', opts);
+    // This route takes pump displays AND printed fuel receipts, and the two have
+    // opposite tolerances. Pump digits survive almost any downscale — 640/0.65
+    // reads them 10/10. A thermal receipt at that setting reads 0/10.
+    //
+    // Quality matters more than pixels for dense print: at the same 1024px,
+    // q0.80 reads a receipt 9/10 while q0.65 reads it 2/10, because JPEG
+    // artifacts smear small glyphs. So keep quality up and trim dimensions.
+    // 1024/0.80 covers both (receipt 9/10, pump 10/10) at roughly half the
+    // payload of the original 1600/0.80.
+    //
+    // Only the OCR request is resized here — uploadDocument has its own resize,
+    // so anything stored against the vehicle is unaffected.
+    return this.ocrPost('/ocr/fuel', file, 1024, 0.80, 'receipt.jpg', opts);
   }
 
   async ocrExpense(file: File, opts?: OcrOptions): Promise<OcrExpenseResult> {

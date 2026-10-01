@@ -341,6 +341,34 @@ The schema is `{"vin": {"type": "string", "pattern": "^[A-HJ-NPR-Z0-9]{17}$"}}`,
 
 Three independent layers, and the VIN lands in an editable field the user confirms. This route already implements the pattern recommended for the other three — it should be the template, not a gap.
 
+### Correction: 640px broke fuel receipts
+
+The sweep below was run on four **pump displays** and its conclusion was shipped to the fuel route,
+which also accepts printed fuel receipts. It broke them completely — a thermal fuel receipt read
+**0/10** at 640/0.65 where it had read 10/10 before. Caught two days later by a location test that
+happened to include a receipt.
+
+The mistake was partitioning by route instead of by image content. The warning was already written
+down — "a parking or parts receipt is dense small print where glyphs occupy far fewer pixels" — and
+applied to the expense route, while the fuel route takes receipts too and its own prompt says so in
+the first line.
+
+Threshold measured afterwards, fuel receipt against the Speedway pump:
+
+| setting | receipt | pump | payload |
+|---------|---------|------|---------|
+| 640 / 0.65 | **0/10** | 10/10 | 18 KB |
+| 800 / 0.65 | 9/10 | 10/10 | 27 KB |
+| 1024 / 0.65 | **2/10** | 10/10 | 45 KB |
+| 1024 / 0.80 | 9/10 | 10/10 | 66 KB |
+
+**JPEG quality matters more than dimensions for dense text.** At identical 1024px, q0.80 reads the
+receipt 9/10 and q0.65 reads it 2/10 — artifacts smear small glyphs in a way downscaling alone does
+not, which is why 800/0.65 beat 1024/0.65 despite being smaller. The fuel route now uses 1024/0.80.
+
+(Rows at 1280 and 1600 were omitted above because the test image is only 1024px, so those resizes
+are no-ops producing identical bytes — not independent data points.)
+
 ### Upload resolution: more pixels bought nothing
 
 Measured from true camera originals (24 MP Costco pump, 12 MP Marathon glare pump), ten runs per
