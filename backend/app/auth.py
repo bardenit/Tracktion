@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
 from typing import Optional
-from jose import JWTError, jwt
+import jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -77,7 +77,7 @@ def verify_token(token: str) -> dict:
             algorithms=[settings.JWT_ALGORITHM],
         )
         return payload
-    except JWTError:
+    except jwt.InvalidTokenError:
         return None
 
 
