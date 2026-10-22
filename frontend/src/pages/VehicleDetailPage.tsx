@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { apiClient, confirmOcrFallback, ocrErrorMessage } from '../services/api';
 import Modal from '../components/Modal';
 import { useToastStore } from '../stores/toastStore';

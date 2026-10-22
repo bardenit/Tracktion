@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { useAuthStore } from './stores/authStore';
 import { useToastStore } from './stores/toastStore';
 import { apiClient } from './services/api';

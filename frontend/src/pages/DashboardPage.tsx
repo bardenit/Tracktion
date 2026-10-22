@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { apiClient } from '../services/api';
 import VehiclePhoto from '../components/VehiclePhoto';
 import type { Vehicle, Reminder, Expense, VehicleCosts } from '../types';

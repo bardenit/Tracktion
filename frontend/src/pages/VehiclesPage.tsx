@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { apiClient, confirmOcrFallback, ocrErrorMessage } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
 import Modal from '../components/Modal';
