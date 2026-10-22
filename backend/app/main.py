@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
+from starlette.routing import Match
 
 from app.config import settings, validate_production_secret
 from app.database import engine
@@ -62,21 +63,22 @@ class StrippedSlashMiddleware:
     def __init__(self, app, routes):
         self.app = app
         self.routes = routes
-        self._slashed_paths = None
 
-    def slashed_paths(self):
-        if self._slashed_paths is None:
-            self._slashed_paths = {
-                route.path
-                for route in self.routes
-                if getattr(route, "path", "").endswith("/") and route.path != "/"
-            }
-        return self._slashed_paths
+    def serves(self, scope, path):
+        # FastAPI >= 0.150 keeps included routers nested rather than flattening
+        # them into app.routes, so ask each route to match instead of reading paths.
+        probe = {**scope, "path": path}
+        return any(route.matches(probe)[0] == Match.FULL for route in self.routes)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             path = scope.get("path", "")
-            if path and not path.endswith("/") and f"{path}/" in self.slashed_paths():
+            if (
+                path
+                and not path.endswith("/")
+                and not self.serves(scope, path)
+                and self.serves(scope, f"{path}/")
+            ):
                 scope = dict(scope)
                 scope["path"] = f"{path}/"
         await self.app(scope, receive, send)
