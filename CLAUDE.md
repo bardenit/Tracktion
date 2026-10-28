@@ -113,6 +113,11 @@ See `frontend/eslint.config.mjs`.
 - Expense categories are user-extensible. Do not constrain them to a fixed enum in
   `ExpenseCreate`; the enum applies only to what the OCR model may return.
 - OCR output is always an editable pre-fill the user confirms, never a silent write.
+- Fuel station names are normalized on write, in `app/services/station_names.py`. One
+  Costco had arrived under four spellings because the receipt header, the pump and the
+  driver each name it differently. A name is only ever replaced by one the fleet already
+  uses — nothing there carries a list of chains — so an unfamiliar station is stored as
+  given and becomes the spelling later variants collapse onto.
 
 ## Permission model
 

@@ -10,6 +10,7 @@ from app.models import User, FuelEntry, FuelIdempotencyOperation
 from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate, FuelBulkImport, BulkImportResponse
 from app.services.bulk_imports import begin_bulk_import, finish_bulk_import
 from app.services.fuel_calculations import recalculate_fuel_economy, validate_fuel_entry_order
+from app.services.station_names import canonical_station, known_station_names
 from app.services.vehicle_mileage import observe_vehicle_mileage
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
@@ -19,17 +20,24 @@ router = APIRouter()
 
 @router.post("/{vehicle_id}/entries/bulk", response_model=BulkImportResponse)
 def import_fuel_entries(vehicle_id: int, batch: FuelBulkImport, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     operation_id, payload_hash, previous = begin_bulk_import(db, current_user.id, vehicle_id, "fuel", batch)
     if previous:
         return BulkImportResponse(operation_id=operation_id, imported_count=previous.imported_count)
     existing = db.query(FuelEntry).filter(FuelEntry.vehicle_id == vehicle_id).all()
     ordered = sorted(batch.entries, key=lambda item: (item.date, item.mileage))
     combined = list(existing)
+    # Grows as the batch is imported, so spellings inside one import collapse
+    # onto each other and not only onto what was already on file.
+    known = known_station_names(db, vehicle.user_id)
     try:
         for item in ordered:
             validate_fuel_entry_order(combined, item.date, item.mileage)
-            entry = FuelEntry(vehicle_id=vehicle_id, **item.model_dump(exclude={"operation_id"}))
+            fields = item.model_dump(exclude={"operation_id"})
+            fields["location"] = canonical_station(fields.get("location"), known)
+            if fields["location"] and fields["location"] not in known:
+                known.append(fields["location"])
+            entry = FuelEntry(vehicle_id=vehicle_id, **fields)
             db.add(entry)
             db.flush()
             combined.append(entry)
@@ -93,7 +101,7 @@ def create_fuel_entry(
         mileage=entry_data.mileage,
         gallons=entry_data.gallons,
         cost=entry_data.cost,
-        location=entry_data.location,
+        location=canonical_station(entry_data.location, known_station_names(db, vehicle.user_id)),
         notes=entry_data.notes,
         octane=entry_data.octane,
         missed_fillup=entry_data.missed_fillup,
@@ -179,7 +187,7 @@ def update_fuel_entry(
     entry.mileage = entry_data.mileage
     entry.gallons = entry_data.gallons
     entry.cost = entry_data.cost
-    entry.location = entry_data.location
+    entry.location = canonical_station(entry_data.location, known_station_names(db, vehicle.user_id))
     entry.notes = entry_data.notes
     entry.octane = entry_data.octane
     entry.missed_fillup = entry_data.missed_fillup
