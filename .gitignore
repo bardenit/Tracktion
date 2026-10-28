@@ -27,3 +27,9 @@ Thumbs.db
 *.sqlite
 *.db
 /data/documents/*
+
+# SMB deletion artifacts left by the external volume
+.smbdelete*
+
+# Per-machine Claude Code permissions, not shared config
+.claude/settings.local.json
