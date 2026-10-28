@@ -73,6 +73,9 @@ export default function VehiclesPage() {
   };
 
   useEffect(() => {
+    // load() sets state only after its await, so nothing re-renders inside this
+    // effect; the rule flags it because it inlines the callee and ignores await.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
 

@@ -127,8 +127,13 @@ export default function AnalyticsTab({ isTrailer, isGasoline, loading, fuelEntri
 
   const cumulativeMilesData = (() => {
     const sorted = [...tripEntries].sort((a, b) => a.date.localeCompare(b.date));
+    const running: { date: string; total: number }[] = [];
     let total = 0;
-    return sorted.map((t) => { total += t.miles; return { date: t.date.slice(5), total: Math.round(total) }; });
+    for (const t of sorted) {
+      total += t.miles;
+      running.push({ date: t.date.slice(5), total: Math.round(total) });
+    }
+    return running;
   })();
 
   if (isTrailer) {

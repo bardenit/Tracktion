@@ -88,10 +88,11 @@ npm run build          # vite build
 **`type-check`, `test` and `build` all pass code that breaks the Rules of
 Hooks** — a `useMemo` below an early return shipped and crashed the app with
 React error #310. `npm run lint` is the only check that catches it, so run it
-on any change to a component. It reports 0 errors and 10 warnings today;
-`react-hooks/rules-of-hooks` is an error, and the React Compiler rules
-(`purity`, `set-state-in-effect`, `immutability`) warn on patterns that already
-exist. See the reasoning in `frontend/eslint.config.mjs`.
+on any change to a component. It is clean today — 0 errors, 0 warnings.
+`rules-of-hooks`, `purity` and `immutability` are errors; `set-state-in-effect`
+is a warning because it mis-reports an async loader called from an effect, and
+the two sites that pattern hits carry an explicit disable with the reasoning.
+See `frontend/eslint.config.mjs`.
 
 ## Structure
 

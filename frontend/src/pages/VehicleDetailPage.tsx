@@ -406,17 +406,20 @@ function MileageRow({ vehicle, onUpdate }: { vehicle: Vehicle; onUpdate: (v: Veh
 
 
 function RecallsCard({ vehicleId }: { vehicleId: number }) {
-  const [recalls, setRecalls] = useState<RecallsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Tagged with the vehicle it was fetched for, so "loading" is derived rather
+  // than set from inside the effect — and switching vehicles cannot briefly show
+  // the previous vehicle's recalls.
+  const [result, setResult] = useState<{ for: number; recalls: RecallsResponse | null } | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const current = result?.for === vehicleId ? result : null;
+  const loading = current === null;
+  const recalls = current?.recalls ?? null;
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     apiClient.getVehicleRecalls(vehicleId)
-      .then((data) => { if (!cancelled) setRecalls(data); })
-      .catch(() => { if (!cancelled) setRecalls(null); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .then((data) => { if (!cancelled) setResult({ for: vehicleId, recalls: data }); })
+      .catch(() => { if (!cancelled) setResult({ for: vehicleId, recalls: null }); });
     return () => { cancelled = true; };
   }, [vehicleId]);
 
@@ -670,6 +673,9 @@ export default function VehicleDetailPage() {
   );
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
+  // Read once per mount. Date.now() called during render returns a new value on
+  // every re-render, so a "days left" count could change while nothing did.
+  const [nowMs] = useState(() => Date.now());
 
   // Vehicle photo
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -692,8 +698,13 @@ export default function VehicleDetailPage() {
   const [documents, setDocuments] = useState<VehicleDocument[]>([]);
 
   // Modal open/close
-  const [fuelModal, setFuelModal] = useState(false);
-  const [maintModal, setMaintModal] = useState(false);
+  // A deep link from the dashboard — /vehicles/3?tab=fuel&action=add — opens the
+  // add form on arrival. Initial state rather than an effect: every other field
+  // these forms need already starts at the value the modal wants, and the page
+  // renders a spinner until the vehicle loads, so the modal cannot appear early.
+  const deepLinkAdd = searchParams.get('action') === 'add' ? searchParams.get('tab') : null;
+  const [fuelModal, setFuelModal] = useState(deepLinkAdd === 'fuel');
+  const [maintModal, setMaintModal] = useState(deepLinkAdd === 'maintenance');
   const [reminderModal, setReminderModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
   const [docModal, setDocModal] = useState(false);
@@ -908,6 +919,10 @@ export default function VehicleDetailPage() {
 
   useEffect(() => {
     if (!vehicle) return;
+    // react-hooks/set-state-in-effect inlines each loader's body and does not
+    // model the await inside it. Every setState below lands in a microtask after
+    // its fetch resolves, so none of them re-renders inside this effect.
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (activeTab === 'fuel') loadFuel().catch(console.error);
     if (activeTab === 'maintenance') {
       loadMaintenance().catch(console.error);
@@ -940,7 +955,9 @@ export default function VehicleDetailPage() {
         .catch(console.error)
         .finally(() => setAnalyticsLoading(false));
     }
-  }, [activeTab, vehicle, loadFuel, loadMaintenance, loadExpenses, loadDocuments, loadParts, loadTrips]);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [activeTab, vehicle, id, loadFuel, loadMaintenance, loadExpenses, loadDocuments, loadParts,
+      loadTrips, loadPhotos, loadInspection]);
 
   // ─── Fuel handlers ──────────────────────────────────────────────────────────
 
@@ -956,26 +973,6 @@ export default function VehicleDetailPage() {
     setFuelModal(false);
     setMpgAnomalyAck('');
   };
-
-  useEffect(() => {
-    if (searchParams.get('action') !== 'add' || loading) return;
-    const tab = searchParams.get('tab');
-    if (tab === 'fuel') {
-      setEditFuel(null);
-      setFuelForm(initialFuelForm());
-      setMpgAnomalyAck('');
-      setFormError('');
-      setFuelModal(true);
-    } else if (tab === 'maintenance') {
-      setEditMaint(null);
-      setMaintForm({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
-      setMaintOther('');
-      setCustomTypesOpen(false);
-      setFormError('');
-      setMaintModal(true);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
 
   const openFuelEdit = (e: FuelEntry) => {
     setEditFuel(e);
@@ -1457,7 +1454,7 @@ export default function VehicleDetailPage() {
     const avg = avgMilesPerDay();
     if (!avg) return null;
     const daysLeft = Math.round(milesLeft / avg);
-    return { daysLeft, estDate: new Date(Date.now() + daysLeft * 86400000) };
+    return { daysLeft, estDate: new Date(nowMs + daysLeft * 86400000) };
   };
 
   const reminderStatus = (r: Reminder) => {
@@ -1466,7 +1463,7 @@ export default function VehicleDetailPage() {
     if (!r.next_due_mileage && !r.next_due_date && !r.target_mileage)
       return { color: 'text-slate-400', bg: 'bg-slate-800/50', label: 'Pending' };
     if (r.next_due_date) {
-      const daysLeft = Math.ceil((new Date(r.next_due_date + 'T00:00:00').getTime() - Date.now()) / 86400000);
+      const daysLeft = Math.ceil((new Date(r.next_due_date + 'T00:00:00').getTime() - nowMs) / 86400000);
       if (daysLeft <= 0) return { color: 'text-red-400', bg: 'bg-red-900/30', label: 'Overdue' };
       if (daysLeft <= 14) return { color: 'text-amber-400', bg: 'bg-amber-900/30', label: `${daysLeft}d left` };
     }
@@ -3238,7 +3235,7 @@ export default function VehicleDetailPage() {
                   <tbody>
                     {expenses.map((e) => {
                       const expDaysLeft = e.expires_on
-                        ? Math.ceil((new Date(e.expires_on + 'T00:00:00').getTime() - Date.now()) / 86400000)
+                        ? Math.ceil((new Date(e.expires_on + 'T00:00:00').getTime() - nowMs) / 86400000)
                         : null;
                       return (
                       <tr key={e.id} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
@@ -3766,7 +3763,7 @@ export default function VehicleDetailPage() {
         const projected = wear.filter((w) => w.milesTo2 != null);
         const minMilesTo2 = projected.length ? Math.min(...projected.map((w) => w.milesTo2!)) : null;
         const mpd = avgMilesPerDay();
-        const replaceDate = minMilesTo2 != null && mpd ? new Date(Date.now() + (minMilesTo2 / mpd) * 86400000) : null;
+        const replaceDate = minMilesTo2 != null && mpd ? new Date(nowMs + (minMilesTo2 / mpd) * 86400000) : null;
         const latestTreads = wear.map((w) => w.current).filter((t): t is number => t != null);
         const unevenWear = latestTreads.length >= 2 && Math.max(...latestTreads) - Math.min(...latestTreads) >= 2;
         const lowTread = latestTreads.some((t) => t <= 4);
