@@ -76,6 +76,13 @@ Backend — no venv is committed; create one on local disk, not on the repo volu
 cd backend && DATA_DIR=/tmp/tracktion-tests python -m pytest tests/ -q
 ```
 
+**The suite runs on SQLite; production is Postgres 18.** SQLite does not enforce a
+varchar length, so anything that only Postgres rejects passes here. A 33-character
+Alembic revision id shipped that way and crash-looped the API against the real
+`alembic_version.version_num` (varchar(32)) — the migration body ran, the stamp
+failed, the whole upgrade rolled back, repeat on every restart. Column widths and
+strict types need checking by eye or against a real Postgres.
+
 Frontend (inside a container, or a local-disk copy):
 
 ```bash

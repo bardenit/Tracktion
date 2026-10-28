@@ -16,7 +16,7 @@ The rules are copied from `app/services/station_names.py` rather than imported
 from it. A migration is frozen history and must not change its behaviour
 because that module was later edited; `test_station_names.py` pins both.
 
-Revision ID: 0011_normalize_fuel_station_names
+Revision ID: 0011_normalize_station_names
 Revises: 0010_maintenance_visits
 """
 from collections import Counter, defaultdict
@@ -26,7 +26,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0011_normalize_fuel_station_names"
+revision = "0011_normalize_station_names"
 down_revision = "0010_maintenance_visits"
 branch_labels = None
 depends_on = None

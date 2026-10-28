@@ -75,3 +75,27 @@ def test_upgrade_restores_configured_s3_profile_and_legacy_primary_photos(db_url
         assert json.loads(profile["configuration"]) == storage_config
         assert connection.scalar(text("SELECT storage_profile_id FROM documents WHERE id = 4")) == profile["id"]
         assert connection.scalar(text("SELECT primary_photo_id FROM vehicles WHERE id = 1")) == 4
+
+
+def test_every_revision_id_fits_the_alembic_version_column():
+    """`alembic_version.version_num` is varchar(32).
+
+    SQLite does not enforce a varchar length, so an over-long revision id
+    passes every test in this suite and then fails on Postgres at the UPDATE
+    that stamps the new revision — after the migration body has run, leaving
+    the API crash-looping on start. `0011_normalize_fuel_station_names` was 33
+    characters and did exactly that in production.
+    """
+    import re
+    from pathlib import Path
+
+    versions = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    revisions = {}
+    for path in sorted(versions.glob("*.py")):
+        found = re.search(r'^revision = "([^"]+)"', path.read_text(), re.MULTILINE)
+        assert found, f"{path.name} declares no revision id"
+        revisions[path.name] = found.group(1)
+
+    assert revisions, "no migrations found"
+    too_long = {name: rev for name, rev in revisions.items() if len(rev) > 32}
+    assert not too_long, f"revision ids over 32 characters: {too_long}"
