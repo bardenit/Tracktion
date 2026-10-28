@@ -9,6 +9,8 @@ from app.models import User, MaintenanceEntry, MaintenanceReminder, MaintenanceC
 from app.schemas import (
     MaintenanceEntryCreate,
     MaintenanceEntryResponse,
+    MaintenanceVisitCreate,
+    MaintenanceVisitResponse,
     MaintenanceReminderCreate,
     MaintenanceReminderUpdate,
     MaintenanceReminderResponse,
@@ -56,6 +58,23 @@ def create_maintenance_entry(
 ):
     check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
+    visit_id = None
+    if entry_data.visit_id:
+        # Only an existing visit on THIS vehicle may be joined. Accepting any
+        # string would let a caller graft an entry onto another vehicle's visit,
+        # which the per-vehicle access check above would not catch.
+        visit_id = entry_data.visit_id.strip()
+        belongs = (
+            db.query(MaintenanceEntry.id)
+            .filter(
+                MaintenanceEntry.visit_id == visit_id,
+                MaintenanceEntry.vehicle_id == vehicle_id,
+            )
+            .first()
+        )
+        if not belongs:
+            raise HTTPException(status_code=404, detail="Unknown visit for this vehicle")
+
     entry = MaintenanceEntry(
         vehicle_id=vehicle_id,
         date=entry_data.date,
@@ -64,6 +83,7 @@ def create_maintenance_entry(
         cost=entry_data.cost,
         service_provider=entry_data.service_provider,
         notes=entry_data.notes,
+        visit_id=visit_id,
     )
     db.add(entry)
 
@@ -74,6 +94,75 @@ def create_maintenance_entry(
     db.commit()
     db.refresh(entry)
     return entry
+
+
+@router.post("/{vehicle_id}/visits", response_model=MaintenanceVisitResponse)
+def create_maintenance_visit(
+    vehicle_id: int,
+    visit: MaintenanceVisitCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Log one shop visit as several maintenance entries sharing a visit_id.
+
+    The client supplies `operation_id`, which becomes the visit_id. Reposting the
+    same id returns the existing visit untouched, so a retry after a dropped
+    connection cannot double-log a service — the same guarantee the fuel route
+    gets from its idempotency table, without needing one.
+    """
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+
+    try:
+        visit_id = str(UUID(visit.operation_id))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid operation ID")
+
+    existing = (
+        db.query(MaintenanceEntry)
+        .filter(MaintenanceEntry.visit_id == visit_id)
+        .order_by(MaintenanceEntry.id)
+        .all()
+    )
+    if existing:
+        if any(entry.vehicle_id != vehicle_id for entry in existing):
+            raise HTTPException(status_code=409, detail="Idempotency operation conflict")
+        return MaintenanceVisitResponse(
+            visit_id=visit_id,
+            entries=existing,
+            total_cost=sum(entry.cost or 0 for entry in existing),
+        )
+
+    entries = []
+    for service in visit.services:
+        entry = MaintenanceEntry(
+            vehicle_id=vehicle_id,
+            date=visit.date,
+            mileage=visit.mileage,
+            type=service.type.strip(),
+            cost=service.cost,
+            service_provider=visit.service_provider,
+            notes=visit.notes,
+            visit_id=visit_id,
+        )
+        db.add(entry)
+        entries.append(entry)
+
+    db.flush()
+    observe_vehicle_mileage(db, vehicle_id, visit.mileage)
+    # One recompute covering every type touched: a reminder's "last performed"
+    # is derived from the newest matching entry, so this is what rolls each
+    # matching reminder forward.
+    recompute_reminders(db, vehicle_id, [e.type for e in entries])
+
+    db.commit()
+    for entry in entries:
+        db.refresh(entry)
+
+    return MaintenanceVisitResponse(
+        visit_id=visit_id,
+        entries=entries,
+        total_cost=sum(entry.cost or 0 for entry in entries),
+    )
 
 
 @router.get("/{vehicle_id}/entries", response_model=List[MaintenanceEntryResponse])

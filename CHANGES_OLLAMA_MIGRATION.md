@@ -861,3 +861,197 @@ The original concern that motivated the debate is also resolved. An earlier draf
 26. The plan originally deleted the integrations settings UI, removed the `anthropic` dependency, dropped the `ANTHROPIC_API_KEY` backfill and the compose env line, and hardcoded the Ollama host. The scope changed on 2026-09-30 to pluggable providers configured in the UI, which reverses all five. The accuracy work is unaffected — it describes the default provider's model and still stands.
 27. The "hardcoded host vs `OLLAMA_BASE_URL`" open question is closed by the provider architecture rather than decided. The risk it flagged — no way to reconfigure from the UI if the Ollama box dies — is what the provider list and ask-before-fallback now solve.
 28. The validation section claimed a `140.00 / 20.5` fabrication was caught by the derived-price check. It is not: `$6.83/gal` is inside the stated $2-7 range. Caught by the unit tests during implementation. The range was left alone — tightening it would reject legitimate high-price fill-ups — and the limitation is now documented and pinned by a test.
+
+---
+
+## Service-invoice route (`/ocr/maintenance`), measured 2026-10-27
+
+Added for the maintenance-visit feature. Measured against a real two-page Todd
+Wenzel repair order: 7 numbered operations, heavy header, a discount line, and a
+totals column clipped off the right edge of page 2. 10 runs, `qwen3.5:4b`,
+`think: false`, temperature 0.
+
+### Invoices need 1536px, and this is the third time resolution has mattered
+
+| Field | 1024px | 1536px |
+|---|---|---|
+| `odometer` | `39174936` — the **R/O number** | `13710` ✓ 5/5 |
+| `date` (`10/27/26`) | `2025-10-27` | `2026-10-27` ✓ 5/5 |
+| operation #1 amount | `26.00` — the labour row | `83.84` ✓ 5/5 |
+
+Same photo, same prompt; only the resize changed, and all three failures cleared
+at 1536 reproducibly. A dealer repair order is denser than any image the earlier
+sweeps used — the header prints the repair-order number directly above the
+mileage, and at 1024 those glyphs merge. This does not contradict "640px bought
+nothing" on pump displays; it is the case that section explicitly declined to
+generalise to.
+
+### The grand total is the *least* reliable field, inverting the usual advice
+
+| | Result |
+|---|---|
+| Per-operation `Sub Total` amounts | **35/35 correct** |
+| `shop`, `odometer`, `date` at ≥1536 | **9/9 correct** |
+| Printed grand total | **0/9 trustworthy** |
+
+Two distinct failure modes, both now caught in `ocr_validation.clean_maintenance`:
+
+- **Page 1's totals box is blank** (the invoice is a "Pre-Invoice"). The model
+  filled the field with operation #1's sub total on 5/5 runs, despite an explicit
+  "you MUST omit this field" instruction. Caught by rejecting a total that exactly
+  equals one of the page's line amounts.
+- **Page 2's total column is clipped** by the photo edge. Runs returned `238.59`,
+  `148.30` ×3 and `238.00`; `148.30` is the PARTS row. Caught by rejecting a total
+  smaller than the operations printed on that same page.
+
+**So the app sums the line items and treats any printed total as a cross-check
+the user sees, never a value it relies on.** This is the opposite of the fuel
+route, where the total is the primary reading.
+
+### A real total can be smaller than the lines it covers
+
+The first implementation also rejected, at merge time, any total below the
+invoice-wide sum. That is wrong and a unit test caught it: this invoice sums to
+**$250.50** of operations and charges **$238.05** after a `-20.00 QL discount`.
+Discounts, not errors, make totals smaller than their lines. The per-page check
+above is the one that carries the weight; the merge step only takes the largest
+page total and warns when it differs from the sum.
+
+### Targeting `Sub Total:` is what makes line items work
+
+Each numbered operation prints its own `Sub Total:` line. The AMOUNT column
+beside it holds labour, parts and fee rows that do **not** align row-for-row with
+the operation they belong to — operation #1 shows `26.00 / 41.70 / 10.90 / 5.24`
+against a sub total of `83.84`. Pointing the prompt at the labelled sub total
+rather than the column is what took per-line extraction from unreliable to 35/35,
+and it is why I expected line items to be the weak point and was wrong.
+
+### Schema carries no patterns at all
+
+Every field here is either legitimately absent on some pages (the total, on a page
+whose box is blank) or transformed rather than copied (the date). Per "A regex
+pattern removes the ability to decline", all shape checking is in Python. A zero
+sub total prints as `.00`, which is not a shape `MONEY_RE` accepts, so it is
+normalised before validation — a no-charge multi-point inspection is still
+service history worth keeping.
+
+### Vocabulary: `Air Filter` was silently rolling the wrong reminder
+
+Not an OCR finding, but it surfaced here. The dropdown offered `Air Filter` while
+the reminder seeder created `Engine Air Filter` and `Cabin Air Filter`, and
+`recompute_reminders` matches on an exact `type` string — so a cabin filter
+logged from the dropdown would have rolled the **engine** filter reminder
+forward. Migration `0010` reconciles the spellings, the dropdown now lists both,
+and `matchServiceType` tests `cabin air filter` before `air filter` so the
+broader pattern cannot win. Operations with no matching type are offered to the
+user as new types and never fuzzy-matched into an existing one.
+
+### Not measured
+
+One invoice, one shop, one model. Independent-shop and quick-lube receipts are
+unmeasured, as is any provider other than Ollama. Dealer invoices are unusually
+well structured — numbered operations with labelled sub totals — and a hand-written
+or thermal-printed shop ticket should be expected to do worse.
+
+### Re-measured 2026-10-28 on sharper photos: the per-page total check was too weak
+
+The user reported a visit total of **230.50** against a receipt billing **238.61**.
+Six replays of his two photos through the deployed pipeline found three distinct
+failure modes, none of them the suspected tax/discount handling.
+
+Ground truth: seven operations summing to **250.50**; `TOTAL DUE` **238.61** =
+250.50 + 8.11 sales tax − 20.00 QL discount. The tax appears only in the totals
+box, never inside an operation, so the line sum can never reach the total.
+
+Reading that box needs care: its value column is offset up by one row from
+`SHOP SUPPLIES` downward, so `SALES TAX` prints beside `HAZARDOUS MATERIALS`,
+the `-20.00` discount prints beside `SPECIAL ORDER DEPOSIT`, and `TOTAL DUE`
+prints beside `DISCOUNTS` while its own row is blank. Taken literally the box
+reads sales tax `.00` and a 238.61 discount. The alignment above is confirmed by
+hazardous materials landing on 10.48, exactly the two 5.24 charges itemised in
+operations #1 and #5. This is a further reason the app sums the operations and
+treats the box as a cross-check: a human misreads it too.
+
+| run | #7 cabin filter | lines | total shown |
+|---|---|---|---|
+| 1, 5 | 79.95 ✓ | 250.50 | 238.61 ✓ |
+| 2 | 79.95 ✓ | 250.50 | rejected |
+| 3 | page 2 lost entirely | 91.70 | 95.24 ✗ |
+| 4 | **59.95 ✗** | **230.50** | 93.48 ✗ |
+
+**1. The blank totals box fabricates, and the per-page check missed it.** Page 1
+is a Pre-Invoice with an empty totals box. The model invents a total there on
+most runs — 94.95, 95.24, 93.48 — and every one clears the per-page rule by
+sitting just *above* page 1's own 91.70 of operations. The rule was written
+against a phantom that equalled a line or fell below the page; these do neither.
+Fixed by also checking each page total against the **invoice-wide** line sum:
+the phantoms are 37-38% of the 250.50 actually billed where the real total is
+95%, so a 0.5-1.5 band rejects all of them and still admits a deep discount.
+
+**2. A misread sub total is indistinguishable from a discount by arithmetic.**
+Operation #7 prints `20.00` (labour) and `59.95` (the filter) in the AMOUNT
+column above `Sub Total: 79.95`. Taking 59.95 yields 230.50 — exactly 20.00
+below the truth, which is also exactly the QL discount on the same invoice. The
+coincidence is what made this look like missing discount handling. This is the
+glare-digit class: a plausible wrong value that passes every check. The one real
+signal is **direction** — fees can push the printed total above the lines, but so
+can a dropped sub total, so that case now says to check the costs instead of
+calling the gap normal.
+
+**3. A page can read as nothing, silently.** Run 3's second page returned no
+operations and the invoice simply looked shorter and cheaper. Now warned on.
+
+**Prompt change tried and reverted.** Spelling out that an operation's labour and
+parts rows are not its amount scored cabin filter 5/6 against 4/5 before — inside
+noise — while the printed total went missing in 4 of 6 runs versus 2 of 5, the
+longer text apparently costing attention on `total`. No measured gain, so the
+wording stays as it was and the fix lives in `ocr_validation` instead. This is
+the fourth time a prompt edit in this document failed to beat its own baseline.
+
+### Discounts read; tax does not. And schema property order is generation order
+
+Asked whether a tax and a discount could be shown as their own lines rather than
+lumped into one adjustment. Measured separately, they could not be more different:
+
+| field | where it is printed | result |
+|---|---|---|
+| `QL discount  -20.00` | a labelled line beside the operations | **6/6** |
+| sales tax `8.11` | a row in the totals box | **1/6** — returned `-7.86`, `-3.21`, `.00`, or nothing |
+
+The discount is an ordinary labelled body line, the same shape as the operation
+sub totals that read 35/35. The tax is in the totals box, whose value column is
+offset from its labels — `SALES TAX` prints beside the *deposit's* zero — so
+there is nothing there to read correctly. **The discount is extracted; tax is
+not, and the gap it leaves goes to the editable visit total.**
+
+**Schema property order is generation order, and it silently cost the whole
+feature.** The probe appended `adjustments` after `services` and read the
+discount 6/6. Shipping it with `adjustments` placed *before* `services` in the
+schema returned `adjustments: null` on 4 of 4 runs and 0 of 11 across two builds
+— the model being asked to emit the field before it had worked through the
+operations it summarises. Moving the property back after `services`, with no
+change to the prompt, restored 6/6. Nothing else differed. Worth remembering
+before reordering any schema in this file.
+
+**Narrowing the prompt also zeroed it.** Asking only for "discount, coupon or
+credit" lines, with "never put a tax, fee or total row in it", returned nothing
+on 5/5. The wording that works asks broadly — discounts, fees and tax, from the
+body *or* the totals box — and `ocr_validation` discards everything that is not
+a discount. Constrain in code, not in the prompt; the model reports, Python
+decides. This is the same lesson as the four prompt edits above.
+
+Two filters earn their place, both from observed output:
+
+- **Keyword and sign.** Only a negative amount whose label matches
+  discount/coupon/credit/rebate. One run returned the entire totals box,
+  including `SPECIAL ORDER DEPOSIT -20.00` — the same discount under the box's
+  name, which would double it. Deduped by amount.
+- **The box's own summary rows are not lines.** `DISCOUNTS -3.34` was observed,
+  a figure printed nowhere on the invoice, and it passes the keyword match. A
+  real discount line is described (`QL discount`); the bare box heading is a
+  summary of lines counted already.
+
+**Run-to-run variance in line extraction remains high and is not improved by any
+of this.** Across six runs the operation count came back 7, 7, 6, 6, 3, 3 — a
+page is sometimes lost entirely. The blank-page warning and the user's own
+review of the pre-fill are what cover it.

@@ -20,7 +20,9 @@ KNOWN_ADDITIVE_COLUMNS = {
     "expenses": {"expires_on"},
     "vehicle_parts": {"needs_order", "order_status"},
     "fuel_entries": {"octane", "missed_fillup", "partial_fillup"},
-    "documents": {"maintenance_entry_id", "storage_profile_id", "content_type", "byte_length", "sha256"},
+    "documents": {"maintenance_entry_id", "storage_profile_id", "content_type", "byte_length",
+                  "sha256", "visit_id"},
+    "maintenance_entries": {"visit_id"},
 }
 KNOWN_RETIRED_COLUMNS = {
     "vehicles": {

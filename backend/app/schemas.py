@@ -227,6 +227,9 @@ class MaintenanceEntryCreate(BaseModel):
     cost: float
     service_provider: Optional[str] = Field(None, max_length=255)
     notes: Optional[str] = Field(None, max_length=1000)
+    # Set only when attaching a line to a visit that already exists, which is
+    # how a visit logged earlier gets its total corrected.
+    visit_id: Optional[str] = Field(None, max_length=36)
 
 
 class MaintenanceEntryResponse(BaseModel):
@@ -238,10 +241,60 @@ class MaintenanceEntryResponse(BaseModel):
     cost: float
     service_provider: Optional[str]
     notes: Optional[str]
+    visit_id: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class MaintenanceVisitService(BaseModel):
+    """One line of a visit. Becomes its own entry.
+
+    A cost may be negative. Sales tax, shop fees and discounts apply to a whole
+    invoice and sit inside no operation, so the operations on a real receipt do
+    not add up to what was paid — the measured Todd Wenzel invoice bills 238.61
+    against 250.50 of operations, being 8.11 of tax less a 20.00 discount. The
+    difference is carried as its own line so every service keeps the cost the
+    receipt prints and the adjustment stays visible instead of being smeared
+    across services that never bore it.
+    """
+    type: str = Field(..., max_length=255)
+    cost: float = Field(0, ge=-1_000_000, le=1_000_000)
+
+
+class MaintenanceVisitCreate(BaseModel):
+    """A single shop visit covering one or more services.
+
+    The services are stored as separate maintenance entries sharing a visit_id,
+    so a reminder keyed on `type` still matches and per-service intervals still
+    compute, while the UI and the PDF report can present them as one visit.
+    """
+    operation_id: str = Field(..., max_length=36)
+    date: date
+    mileage: float = Field(..., ge=0)
+    service_provider: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
+    services: List[MaintenanceVisitService] = Field(..., min_length=1, max_length=25)
+
+    @field_validator("services")
+    @classmethod
+    def _unique_types(cls, value):
+        seen = set()
+        for item in value:
+            key = item.type.strip().lower()
+            if not key:
+                raise ValueError("A service type cannot be blank")
+            if key in seen:
+                raise ValueError(f"Duplicate service type: {item.type}")
+            seen.add(key)
+        return value
+
+
+class MaintenanceVisitResponse(BaseModel):
+    visit_id: str
+    entries: List[MaintenanceEntryResponse]
+    total_cost: float
 
 
 # Expense Schemas
@@ -311,6 +364,7 @@ class DocumentResponse(BaseModel):
     id: int
     vehicle_id: int
     maintenance_entry_id: Optional[int] = None
+    visit_id: Optional[str] = None
     filename: str
     document_type: str
     ocr_text: Optional[str]

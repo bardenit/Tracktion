@@ -46,6 +46,8 @@ export interface MaintenanceEntry {
   cost: number;
   service_provider?: string;
   notes?: string;
+  /** Shared by every service logged in the same shop visit. */
+  visit_id?: string | null;
 }
 
 export interface Reminder {
@@ -85,6 +87,9 @@ export interface VehicleDocument {
   filename: string;
   uploaded_at: string;
   maintenance_entry_id?: number | null;
+  /** A receipt belongs to a visit, so it stays visible from every service
+   *  in that visit rather than only the entry it was attached to. */
+  visit_id?: string | null;
 }
 
 export interface VehiclePhoto {

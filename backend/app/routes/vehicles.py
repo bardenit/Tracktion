@@ -6,7 +6,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import User, Vehicle, VehicleCollaborator, FuelEntry, MaintenanceEntry, Expense, TireEvent
+from app.models import User, Vehicle, VehicleCollaborator, FuelEntry, MaintenanceEntry, Expense, TireEvent, Document
 from app.schemas import (
     VehicleCreate,
     VehicleUpdate,
@@ -214,7 +214,15 @@ def vehicle_report(
     expenses = db.query(Expense).filter(Expense.vehicle_id == vehicle_id).all()
     tire_events = db.query(TireEvent).filter(TireEvent.vehicle_id == vehicle_id).all()
 
-    pdf = build_vehicle_report(vehicle, fuel_entries, maint_entries, expenses, tire_events)
+    receipt_visit_ids = {
+        visit_id for (visit_id,) in db.query(Document.visit_id)
+        .filter(Document.vehicle_id == vehicle_id, Document.visit_id.isnot(None))
+        .distinct()
+    }
+
+    pdf = build_vehicle_report(
+        vehicle, fuel_entries, maint_entries, expenses, tire_events, receipt_visit_ids
+    )
     filename = f"{vehicle.year}-{vehicle.make}-{vehicle.model}-report.pdf".replace(" ", "-").lower()
     return Response(
         content=pdf,

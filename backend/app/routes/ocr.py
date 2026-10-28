@@ -151,6 +151,87 @@ _VIN_SCHEMA = {
 }
 
 
+# Service-invoice prompt, measured 2026-10-27 against a two-page dealer repair
+# order. Two findings drive its wording. First, a numbered operation's printed
+# "Sub Total:" line reads reliably (35/35) while the AMOUNT column beside it does
+# not — that column holds labour, parts and fee rows that do not align with the
+# operation they belong to, and at low resolution the model returns the first of
+# them instead of the sub total. Second, the repair-order number sits directly
+# above the mileage in the header and gets returned as the odometer unless it is
+# ruled out by name. Invoices need 1536px; 1024px regressed all of this.
+_MAINTENANCE_PROMPT = (
+    "This is a photo of ONE PAGE of a vehicle service invoice or repair order from a repair "
+    "shop or dealership. Transcribe ONLY what is printed on this page. Do not compute, derive, "
+    "infer, or guess any value. Do not add anything up.\n"
+    "shop: the business name printed at the top of the page. Name only.\n"
+    "odometer: the mileage reading, labelled 'Mileage Out', 'Mileage In', 'Odometer' or 'Miles'. "
+    "If both Mileage In and Mileage Out are printed, use Mileage Out. Digits only. NEVER use the "
+    "R/O Number, Repair Order Number, Invoice Number, Registration Number, or any value labelled "
+    "with a '#'. A mileage reading is at most 6 digits.\n"
+    "date: the service date, formatted YYYY-MM-DD. Prefer a date labelled 'R/O Close Date', "
+    "'Invoice Date' or 'Date Closed' over an open, created, or promised date. Year rules: a "
+    "four-digit year is used as printed; a two-digit year such as 10/27/26 is expanded into the "
+    "2000s, so 26 means 2026; if no year is printed at all, omit this field.\n"
+    "total: the final amount charged, labelled 'TOTAL DUE', 'TOTAL', 'AMOUNT DUE' or 'Balance "
+    "Due'. It always has exactly 2 digits after the decimal point. If the total box on this page "
+    "is blank, or no such total is printed on THIS page, you MUST omit this field. Never add up "
+    "the operations to produce it. Never copy a LABOR, PARTS or SUBLET figure into it.\n"
+    "services: one entry for each numbered operation printed on this page. Operations are "
+    "numbered '#1', '#2', '#3' and so on. For each numbered operation:\n"
+    "  name: its description, at most 8 words, copied from the line beside its number. Do not "
+    "include part numbers, technician names, or the word 'Installed'.\n"
+    "  amount: the value printed on that operation's 'Sub Total:' line. It always has exactly 2 "
+    "digits after the decimal point. Copy it exactly, including when the sub total is zero, which "
+    "prints as .00 and means 0.00. Do NOT use any other number from the AMOUNT column.\n"
+    "adjustments: one entry for each line that changes the amount due but is NOT a numbered "
+    "operation — a discount, a coupon, a credit, a shop supplies charge, or sales tax. These "
+    "are printed either as their own labelled line among the operations, such as 'QL discount', "
+    "or as a labelled row in the totals box, such as 'SALES TAX'. For each:\n"
+    "  label: the words printed beside the amount, at most 4 words, copied exactly.\n"
+    "  amount: the amount printed for it, with a leading minus sign if the printed amount has "
+    "one. It always has exactly 2 digits after the decimal point.\n"
+    "Omit this field entirely if no such line is printed on this page. A row whose amount is "
+    "blank or .00 must be omitted.\n"
+    "NEVER include a person's name, street address, phone number, email address, VIN, licence "
+    "plate, registration number or account number in any field.\n"
+    "Return ONLY valid JSON. Omit any field whose value is not printed on this page."
+)
+
+# Nothing here carries a pattern. Every field is either absent on some pages
+# (the total, on a page whose box is blank) or transformed rather than copied
+# (the date), and a constrained field cannot be left empty — the model invents
+# a correctly-shaped value instead. Shape checks run in ocr_validation.
+_MAINTENANCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "shop": {"type": "string"},
+        "odometer": {"type": "string"},
+        "date": {"type": "string"},
+        "total": {"type": "string"},
+        "services": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "amount": {"type": "string"},
+                },
+            },
+        },
+        "adjustments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "amount": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
 def _alternatives(exclude_id: str) -> list:
     return [
         {"id": p.get("id"), "label": p.get("label") or p.get("id")}
@@ -251,6 +332,39 @@ async def ocr_document_expiry(
     raw = await _scan(file, _DOC_EXPIRY_PROMPT, _DOC_EXPIRY_SCHEMA, provider)
     cleaned, warnings = ocr_validation.clean_document(raw)
     return {**cleaned, "warnings": warnings}
+
+
+MAX_INVOICE_PAGES = 6
+
+
+@router.post("/maintenance")
+async def ocr_maintenance(
+    files: list[UploadFile] = File(...),
+    provider: str = Form(""),
+    current_user: User = Depends(get_current_user),
+):
+    """Scan a service invoice, one request per visit, one or more pages.
+
+    Pages are scanned individually and merged, because a multi-page repair order
+    repeats its header on every page and carries its totals box on only one of
+    them. Scanning them as a batch would also exceed the token budget the small
+    local model runs under.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="Attach at least one page.")
+    if len(files) > MAX_INVOICE_PAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many pages (max {MAX_INVOICE_PAGES}).",
+        )
+
+    pages = []
+    for file in files:
+        raw = await _scan(file, _MAINTENANCE_PROMPT, _MAINTENANCE_SCHEMA, provider)
+        pages.append(ocr_validation.clean_maintenance(raw))
+
+    merged, warnings = ocr_validation.merge_maintenance(pages)
+    return {**merged, "page_count": len(files), "warnings": warnings}
 
 
 _VIN_TRANSLIT = {

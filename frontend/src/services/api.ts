@@ -54,6 +54,27 @@ export interface OcrOptions {
   onProviderUnreachable?: OcrFallbackPrompt;
 }
 
+export interface OcrMaintenanceService { name: string; amount?: number }
+
+export interface OcrMaintenanceResult {
+  shop?: string;
+  odometer?: number;
+  date?: string;
+  /** The printed grand total, when one could be read and trusted. Often absent
+   *  — see ocrMaintenance for why it is the least reliable field on an invoice. */
+  total?: number;
+  /** Sum of the per-operation sub totals. This is the dependable number. */
+  lines_total: number;
+  /** Discount, coupon and credit lines printed beside the operations. Measured
+   *  6/6 on a labelled body line. Tax is deliberately NOT read — it lives in the
+   *  totals box, whose value column is offset from its labels, and it measured
+   *  1/6 while returning confident wrong numbers. */
+  discounts?: { label: string; amount: number }[];
+  services: OcrMaintenanceService[];
+  page_count: number;
+  warnings: string[];
+}
+
 export interface OcrFuelResult {
   cost?: number; gallons?: number; price_per_gallon?: number;
   date?: string; location?: string; mileage?: number;
@@ -541,6 +562,48 @@ class ApiClient {
     }
   }
 
+  /** Like ocrPost, but sends several pages in one request. */
+  private async ocrPostMulti(path: string, files: File[], maxDim: number, quality: number, opts?: OcrOptions) {
+    const resized = await Promise.all(
+      files.map((file, i) => resizeImageForUpload(file, maxDim, quality, `page-${i + 1}.jpg`)),
+    );
+    const send = async (provider?: string) => {
+      const formData = new FormData();
+      resized.forEach((page) => formData.append('files', page));
+      if (provider) formData.append('provider', provider);
+      const response = await this.client.post(path, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        // A six-page invoice is six sequential scans at ~5s each, which can
+        // outrun the nginx proxy default if the model also has to load.
+        timeout: 180000,
+      });
+      return response.data;
+    };
+    try {
+      return await send(opts?.provider);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const alternatives: OcrProviderRef[] = detail?.alternatives || [];
+      if (err?.response?.status !== 503 || !detail?.provider_unreachable) throw err;
+      if (!opts?.onProviderUnreachable || alternatives.length === 0) throw err;
+      const chosen = await opts.onProviderUnreachable(detail.detail || 'The OCR provider is unreachable.', alternatives);
+      if (!chosen) throw err;
+      return await send(chosen);
+    }
+  }
+
+  /** Scan a service invoice. Pass every page of one visit in a single call.
+   *
+   *  1536px, not the 1024 the fuel route uses. Measured 2026-10-27 on a dealer
+   *  repair order: at 1024 the header's repair-order number came back as the
+   *  odometer, a two-digit year expanded to the wrong year, and the first
+   *  operation's sub total was read off the wrong column — all three correct at
+   *  1536, reproducibly, from the same photo. A shop invoice is denser print
+   *  than anything the other routes were tuned against. */
+  async ocrMaintenance(files: File[], opts?: OcrOptions): Promise<OcrMaintenanceResult> {
+    return this.ocrPostMulti('/ocr/maintenance', files, 1536, 0.80, opts);
+  }
+
   async ocrFuel(file: File, opts?: OcrOptions): Promise<OcrFuelResult> {
     // This route takes pump displays AND printed fuel receipts, and the two have
     // opposite tolerances. Pump digits survive almost any downscale — 640/0.65
@@ -693,6 +756,37 @@ class ApiClient {
   }
 
   // Maintenance endpoints
+  /** Log one shop visit as several maintenance entries sharing a visit id.
+   *  `operation_id` doubles as that visit id, so a retry cannot double-log. */
+  async createMaintenanceVisit(vehicleId: number, payload: {
+    operation_id: string;
+    date: string;
+    mileage: number;
+    service_provider?: string;
+    notes?: string;
+    services: { type: string; cost: number }[];
+  }) {
+    const response = await this.client.post(`/maintenance/${vehicleId}/visits`, payload);
+    return response.data;
+  }
+
+  /** Upload the photographed pages of a receipt as one merged PDF, attached to
+   *  the visit rather than to a single service. */
+  async uploadReceipt(vehicleId: number, files: File[], visitId: string, maintenanceEntryId?: number) {
+    const resized = await Promise.all(
+      files.map((file, i) => resizeImageForUpload(file, 1600, 0.82, `page-${i + 1}.jpg`)),
+    );
+    const formData = new FormData();
+    resized.forEach((page) => formData.append('files', page));
+    formData.append('visit_id', visitId);
+    if (maintenanceEntryId != null) formData.append('maintenance_entry_id', String(maintenanceEntryId));
+    const response = await this.client.post(`/documents/${vehicleId}/receipt`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    });
+    return response.data;
+  }
+
   async createMaintenanceEntry(vehicleId: number, entryData: any) {
     const response = await this.client.post(`/maintenance/${vehicleId}/entries`, entryData);
     return response.data;
@@ -785,12 +879,27 @@ class ApiClient {
   }
 
   // Document endpoints
-  async uploadDocument(vehicleId: number, file: File, documentType: string, maintenanceEntryId?: number) {
-    const resized = await resizeImageForUpload(file, 1500, 0.78, 'document.jpg');
+  async uploadDocument(
+    vehicleId: number, file: File, documentType: string,
+    maintenanceEntryId?: number, visitId?: string, nameBase?: string,
+  ) {
+    // Name the file for what it is: several attachments on one record all
+    // arriving as "document.jpg" are indistinguishable in the list. A caller
+    // that knows the record passes a base; otherwise keep the source name.
+    const base = nameBase || (file.name || 'document').replace(/\.[^.]+$/, '') || 'document';
+    const isImage = file.type.startsWith('image/');
+    const ext = isImage ? 'jpg' : ((file.name.match(/\.([^.]+)$/) || [])[1] || 'bin');
+    const name = `${base}.${ext}`;
+    const resized = await resizeImageForUpload(file, 1500, 0.78, name);
     const formData = new FormData();
-    formData.append('file', resized);
+    // A non-image passes through the resize untouched and keeps its own name,
+    // so the part's filename is set here rather than relying on the File.
+    formData.append('file', resized, name);
     formData.append('document_type', documentType);
     if (maintenanceEntryId != null) formData.append('maintenance_entry_id', String(maintenanceEntryId));
+    // Paperwork for a visit belongs to the visit, so every service in it shows
+    // the document rather than only the entry the upload was anchored to.
+    if (visitId) formData.append('visit_id', visitId);
 
     const response = await this.client.post(`/documents/${vehicleId}/documents`, formData, {
       headers: {

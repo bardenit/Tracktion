@@ -14,6 +14,7 @@ from app.auth import get_current_user
 from app.deps import check_vehicle_access
 from app.storage import get_storage, get_storage_for_profile, get_active_profile, new_object_key
 from app.services.storage_cleanup import schedule_cleanup
+from app.services.receipt_pdf import images_to_pdf
 
 router = APIRouter()
 
@@ -36,6 +37,37 @@ def _media_type(filename: str) -> str:
     if name.endswith('.pdf'):
         return 'application/pdf'
     return 'application/octet-stream'
+
+
+def _service_slug(text: str, limit: int = 40) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    if len(slug) > limit:
+        slug = slug[:limit]
+        # An OCR'd operation name runs long; cut it on a word boundary rather
+        # than mid-word.
+        if "-" in slug:
+            slug = slug[:slug.rindex("-")]
+    return slug.strip("-") or "service"
+
+
+def _receipt_filename(db: Session, vehicle_id: int, visit_id: str, entry_id: int | None) -> str:
+    """Name a receipt after the service it documents.
+
+    `receipt-c087ab7c.pdf` says nothing in a list of documents. The visit's
+    first service, its date and the odometer do, and sort usefully. The id-based
+    name stays as the fallback for a visit whose entries are gone.
+    """
+    entries = db.query(MaintenanceEntry).filter_by(vehicle_id=vehicle_id, visit_id=visit_id)
+    entry = (entries.filter_by(id=entry_id).first() if entry_id else None) \
+        or entries.order_by(MaintenanceEntry.id).first()
+    if entry is None:
+        return f"receipt-{visit_id[:8]}.pdf"
+    parts = [_service_slug(entry.type)]
+    if entry.date:
+        parts.append(entry.date.isoformat())
+    if entry.mileage:
+        parts.append(f"{int(entry.mileage)}mi")
+    return "-".join(parts) + ".pdf"
 
 
 def _safe_filename(filename: str | None, fallback: str = 'file') -> str:
@@ -78,12 +110,91 @@ def _photo_successor(db: Session, vehicle_id: int, excluding_id: int) -> Documen
     )
 
 
+MAX_RECEIPT_PAGES = 6
+
+
+@router.post("/{vehicle_id}/receipt", response_model=DocumentResponse)
+async def upload_receipt(
+    vehicle_id: int,
+    files: List[UploadFile] = File(...),
+    visit_id: str = Form(...),
+    maintenance_entry_id: int | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Store a photographed receipt as a single PDF attached to a visit.
+
+    The pages are merged rather than stored individually so the paperwork for
+    one visit is one file. `visit_id` is what the UI resolves attachments by, so
+    the receipt stays visible from every service in the visit even if one of
+    those services is later deleted.
+    """
+    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+
+    if not files:
+        raise HTTPException(status_code=400, detail="Attach at least one page")
+    if len(files) > MAX_RECEIPT_PAGES:
+        raise HTTPException(status_code=400, detail=f"Too many pages (max {MAX_RECEIPT_PAGES})")
+
+    if maintenance_entry_id is not None and not db.query(MaintenanceEntry.id).filter_by(
+        id=maintenance_entry_id, vehicle_id=vehicle_id
+    ).first():
+        raise HTTPException(status_code=400, detail="Maintenance entry does not belong to this vehicle")
+
+    pages = []
+    for upload in files:
+        data = await _read_limited(upload)
+        try:
+            content_type = detect_content_type(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if content_type not in IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Receipt pages must be images")
+        pages.append(data)
+
+    try:
+        pdf = images_to_pdf(pages, title=f"Service receipt — visit {visit_id[:8]}")
+    except Exception:
+        # HEIC without a decoder is the realistic cause; the client converts to
+        # JPEG before upload, so this is a genuine error rather than a fallback.
+        raise HTTPException(status_code=400, detail="Could not build a PDF from those images")
+
+    relative_path = new_object_key(current_user.id, vehicle_id)
+    profile = get_active_profile(db)
+    storage = get_storage(profile)
+    storage.save(pdf, relative_path, "application/pdf")
+
+    doc = Document(
+        vehicle_id=vehicle_id,
+        maintenance_entry_id=maintenance_entry_id,
+        visit_id=visit_id,
+        filename=_receipt_filename(db, vehicle_id, visit_id, maintenance_entry_id),
+        storage_path=relative_path,
+        storage_profile_id=profile.id,
+        content_type="application/pdf",
+        byte_length=len(pdf),
+        sha256=hashlib.sha256(pdf).hexdigest(),
+        document_type="service",
+        ocr_text=None,
+    )
+    db.add(doc)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        schedule_cleanup(db, profile.id, relative_path)
+        raise
+    db.refresh(doc)
+    return doc
+
+
 @router.post("/{vehicle_id}/documents", response_model=DocumentResponse)
 async def upload_document(
     vehicle_id: int,
     file: UploadFile = File(...),
     document_type: str = Form(...),
     maintenance_entry_id: int | None = Form(None),
+    visit_id: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -110,6 +221,7 @@ async def upload_document(
     doc = Document(
         vehicle_id=vehicle_id,
         maintenance_entry_id=maintenance_entry_id,
+        visit_id=visit_id,
         filename=safe_name,
         storage_path=relative_path,
         storage_profile_id=profile.id,

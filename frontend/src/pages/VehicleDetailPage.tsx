@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { apiClient, confirmOcrFallback, ocrErrorMessage } from '../services/api';
 import Modal from '../components/Modal';
@@ -16,11 +16,53 @@ import type {
 
 type Tab = 'summary' | 'fuel' | 'trips' | 'maintenance' | 'expenses' | 'documents' | 'parts' | 'analytics' | 'inspect' | 'tires' | 'nhtsa';
 
+// 'Air Filter' was ambiguous: the reminder seeder creates 'Engine Air Filter'
+// and 'Cabin Air Filter', and a reminder only matches an entry whose type string
+// is identical, so a cabin filter logged as 'Air Filter' silently rolled the
+// engine filter reminder forward instead. Migration 0010 renames existing data.
+// The default name for a visit's tax/fee/discount line. It is editable, and it
+// is deliberately not a service type — nothing should ever match a reminder.
+const ADJUSTMENT_LABEL = 'Tax, fees & discounts';
+
 const VEHICLE_SERVICE_TYPES = [
-  'Oil Change', 'Tire Rotation', 'Brake Service', 'Air Filter',
-  'Transmission Service', 'Coolant Flush', 'Spark Plugs', 'Battery',
-  'Alignment', 'Wiper Blades', 'Other',
+  'Oil Change', 'Tire Rotation', 'Brake Service', 'Brake Fluid',
+  'Engine Air Filter', 'Cabin Air Filter', 'Transmission Service',
+  'Coolant Flush', 'Spark Plugs', 'Battery', 'Alignment', 'Wiper Blades',
+  'Other',
 ];
+
+// Maps what a shop prints onto the service types this app tracks. Order is
+// load-bearing: 'cabin air filter' must be tested before 'air filter', and
+// 'brake fluid' before the generic brake rule, or the broader pattern wins and
+// the wrong reminder gets rolled forward. Anything unmatched is offered to the
+// user as a new type rather than guessed at.
+const OCR_SERVICE_PATTERNS: [RegExp, string][] = [
+  [/cabin\s*(air\s*)?filter/i, 'Cabin Air Filter'],
+  [/engine\s*air\s*filter|(?<!cabin\s)air\s*filter/i, 'Engine Air Filter'],
+  [/brake\s*fluid/i, 'Brake Fluid'],
+  [/oil\s*change|lube.*oil|engine\s*oil/i, 'Oil Change'],
+  [/rotate\s*tires?|tire\s*rotation/i, 'Tire Rotation'],
+  [/fuel\s*filter/i, 'Fuel Filter'],
+  [/spark\s*plug/i, 'Spark Plugs'],
+  [/coolant|antifreeze/i, 'Coolant Flush'],
+  [/transmission/i, 'Transmission Service'],
+  [/align/i, 'Alignment'],
+  [/wiper/i, 'Wiper Blades'],
+  [/battery/i, 'Battery'],
+  [/brake|rotor|caliper|pad/i, 'Brake Service'],
+];
+
+/** Match one printed operation to a known service type, or null to leave it as
+ *  a free-text extra the user confirms. Never fuzzy-matches into a type that is
+ *  not offered for this vehicle. */
+function matchServiceType(printed: string, available: string[]): string | null {
+  const exact = available.find((t) => t.toLowerCase() === printed.trim().toLowerCase());
+  if (exact) return exact;
+  for (const [pattern, type] of OCR_SERVICE_PATTERNS) {
+    if (pattern.test(printed) && available.includes(type)) return type;
+  }
+  return null;
+}
 
 const TRAILER_SERVICE_TYPES = [
   'Wheel Bearing Service', 'Hub Inspection', 'Axle Seal Replacement',
@@ -31,6 +73,16 @@ const TRAILER_SERVICE_TYPES = [
 ];
 
 const EXPENSE_CATEGORIES = ['insurance', 'registration', 'repair', 'fuel', 'other'];
+/** An emoji paperclip ignores CSS `color` — it renders in the system's own
+ *  colours, so the teal "has paperwork" state never showed. An inline SVG
+ *  inherits currentColor and can. */
+const ClipIcon = ({ className = '' }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 ${className}`} aria-hidden="true">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
 const DOC_TYPES = ['registration', 'insurance', 'receipt', 'service', 'warranty', 'other'];
 const FUEL_CSV_HEADERS = ['date', 'mileage', 'gallons', 'cost', 'partial_fillup', 'missed_fillup', 'octane', 'location', 'notes'] as const;
 const MAINT_CSV_HEADERS = ['date', 'type', 'mileage', 'cost', 'provider', 'notes'] as const;
@@ -703,13 +755,38 @@ export default function VehicleDetailPage() {
   const [newCatInput, setNewCatInput] = useState('');
   const [maintOther, setMaintOther] = useState('');
   const [maintForm, setMaintForm] = useState({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
+  // Logging a visit: several services ticked at once, each with its own cost,
+  // plus the receipt pages. Editing an existing record still uses maintForm.
+  const [visitHeader, setVisitHeader] = useState({ date: today(), mileage: 0, service_provider: '', notes: '' });
+  const [visitLines, setVisitLines] = useState<Record<string, string>>({});
+  const [visitExtras, setVisitExtras] = useState<{ type: string; cost: string }[]>([]);
+  // Sales tax, shop fees and discounts apply to a whole invoice and belong to
+  // no single service, so they are carried as one visible line rather than
+  // smeared across services that never bore them.
+  const [visitAdjust, setVisitAdjust] = useState<{ label: string; cost: string } | null>(null);
+  // What the user is typing into the visit total, held verbatim until they leave
+  // the field. The total itself is derived, and re-deriving it on every keystroke
+  // reformatted "2" to "2.00" and pushed the caret past the decimals.
+  const [visitTotalDraft, setVisitTotalDraft] = useState<string | null>(null);
+  // Correcting the total of a visit already logged.
+  const [visitTotalEdit, setVisitTotalEdit] = useState<{ visitId: string; current: number; value: string } | null>(null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrSummary, setOcrSummary] = useState<{ total?: number; linesTotal: number; pages: number; warnings: string[] } | null>(null);
   const [reminderTrigger, setReminderTrigger] = useState<'interval' | 'target'>('interval');
+  // Reminders and records were stacked in one long tab; on a phone that is a lot
+  // of scrolling before the history starts.
+  const [maintView, setMaintView] = useState<'records' | 'reminders'>('records');
+  const [expandedVisits, setExpandedVisits] = useState<Set<string>>(new Set());
   const [reminderForm, setReminderForm] = useState({ service_type: 'Oil Change', interval_miles: '', interval_days: '', target_mileage: '', reminder_miles: '500' });
   const [expenseForm, setExpenseForm] = useState({ category: 'insurance', amount: 0, date: today(), description: '', expires_on: '' });
   const [partForm, setPartForm] = useState({ name: '', part_number: '', brand: '', category: 'filters', notes: '', order_status: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docType, setDocType] = useState('registration');
   const [docViewer, setDocViewer] = useState<{ url: string; blob: Blob; mime: string; filename: string } | null>(null);
+  // Both modals are z-50, so the attachments list painted over the photo it had
+  // just opened. The list steps aside and comes back when the viewer closes.
+  const [attachReturn, setAttachReturn] = useState<MaintenanceEntry | null>(null);
   const [mpgAnomalyAck, setMpgAnomalyAck] = useState('');
   const [attachEntry, setAttachEntry] = useState<MaintenanceEntry | null>(null);
   const [attachDocs, setAttachDocs] = useState<VehicleDocument[]>([]);
@@ -832,7 +909,11 @@ export default function VehicleDetailPage() {
   useEffect(() => {
     if (!vehicle) return;
     if (activeTab === 'fuel') loadFuel().catch(console.error);
-    if (activeTab === 'maintenance') loadMaintenance().catch(console.error);
+    if (activeTab === 'maintenance') {
+      loadMaintenance().catch(console.error);
+      // Needed to mark which services have paperwork attached.
+      loadDocuments().catch(() => {});
+    }
     if (activeTab === 'expenses') loadExpenses().catch(console.error);
     if (activeTab === 'documents') loadDocuments().catch(console.error);
     if (activeTab === 'parts') loadParts().catch(console.error);
@@ -976,6 +1057,7 @@ export default function VehicleDetailPage() {
   const openMaintAdd = () => {
     setEditMaint(null);
     setMaintForm({ date: today(), mileage: 0, type: 'Oil Change', cost: 0, service_provider: '', notes: '' });
+    resetVisitForm();
     setMaintOther('');
     setCustomTypesOpen(false);
     setFormError('');
@@ -990,6 +1072,203 @@ export default function VehicleDetailPage() {
     setCustomTypesOpen(false);
     setFormError('');
     setMaintModal(true);
+  };
+
+  const resetVisitForm = () => {
+    setVisitHeader({ date: today(), mileage: vehicle?.current_mileage || 0, service_provider: '', notes: '' });
+    setVisitLines({});
+    setVisitExtras([]);
+    setVisitAdjust(null);
+    setVisitTotalDraft(null);
+    setReceiptFiles([]);
+    setOcrSummary(null);
+  };
+
+  const toggleVisitService = (type: string) => {
+    setVisitLines((prev) => {
+      const next = { ...prev };
+      if (type in next) delete next[type];
+      else next[type] = '';
+      return next;
+    });
+  };
+
+  const visitServicesTotal = () =>
+    [...Object.values(visitLines), ...visitExtras.map((x) => x.cost)]
+      .reduce((sum, cost) => sum + (Number(cost) || 0), 0);
+
+  const visitTotal = () => visitServicesTotal() + (Number(visitAdjust?.cost) || 0);
+
+  // Typing a total never edits a service. The difference becomes the adjustment
+  // line, so every service keeps the cost the receipt prints.
+  const setVisitTotalTo = (value: string) => {
+    const target = Number(value);
+    if (value.trim() === '' || Number.isNaN(target)) {
+      setVisitAdjust(null);
+      return;
+    }
+    const difference = Math.round((target - visitServicesTotal()) * 100) / 100;
+    if (Math.abs(difference) < 0.005) {
+      setVisitAdjust(null);
+      return;
+    }
+    setVisitAdjust((prev) => ({
+      label: prev?.label || ADJUSTMENT_LABEL,
+      cost: difference.toFixed(2),
+    }));
+  };
+
+  const pickReceiptPages = (files: File[]) => {
+    setReceiptFiles(files);
+    // Warm the model while the user is still looking at the form.
+    apiClient.preloadOcr().catch(() => {});
+  };
+
+  const scanReceipt = async () => {
+    if (!receiptFiles.length) return;
+    setOcrBusy(true);
+    setFormError('');
+    try {
+      const res = await apiClient.ocrMaintenance(receiptFiles, { onProviderUnreachable: confirmOcrFallback });
+      // Everything below is an editable pre-fill the user confirms. Nothing is
+      // written from a scan alone — the reading is wrong often enough that the
+      // confirmation step is the only real control.
+      setVisitHeader((p) => ({
+        ...p,
+        date: res.date || p.date,
+        mileage: res.odometer ?? p.mileage,
+        service_provider: res.shop || p.service_provider,
+      }));
+      const matched: Record<string, string> = {};
+      const extras: { type: string; cost: string }[] = [];
+      for (const service of res.services || []) {
+        const amount = service.amount != null ? service.amount.toFixed(2) : '';
+        const type = matchServiceType(service.name, SERVICE_TYPES);
+        // An operation the app has no type for becomes an editable extra rather
+        // than being forced into the nearest match or folded into "Other".
+        if (type && !(type in matched)) matched[type] = amount;
+        else extras.push({ type: service.name, cost: amount });
+      }
+      // A discount is printed as its own labelled line, so it is kept as one
+      // rather than being folded into the balancing adjustment.
+      for (const discount of res.discounts || []) {
+        extras.push({ type: discount.label, cost: discount.amount.toFixed(2) });
+      }
+      setVisitLines((prev) => ({ ...prev, ...matched }));
+      setVisitExtras(extras);
+      setOcrSummary({
+        total: res.total,
+        linesTotal: res.lines_total,
+        pages: res.page_count,
+        warnings: res.warnings || [],
+      });
+      const found = (res.services || []).length;
+      addToast('success', `Read ${found} operation${found === 1 ? '' : 's'} — check them before saving`);
+    } catch (err: any) {
+      setFormError(ocrErrorMessage(err, 'Could not read that receipt — enter the details manually'));
+    } finally {
+      setOcrBusy(false);
+    }
+  };
+
+  const saveVisitTotal = async () => {
+    if (!visitTotalEdit) return;
+    const target = Number(visitTotalEdit.value);
+    if (Number.isNaN(target)) return;
+    const difference = Math.round((target - visitTotalEdit.current) * 100) / 100;
+    if (Math.abs(difference) < 0.005) { setVisitTotalEdit(null); return; }
+
+    const inVisit = maintEntries.filter((x) => x.visit_id === visitTotalEdit.visitId);
+    // Reuse the visit's existing adjustment rather than stacking a second one.
+    const existing = inVisit.find((x) => x.type.trim().toLowerCase() === ADJUSTMENT_LABEL.toLowerCase());
+    const anchorEntry = inVisit[0];
+    if (!anchorEntry) return;
+    setSaving(true);
+    try {
+      if (existing) {
+        const updated = Math.round(((Number(existing.cost) || 0) + difference) * 100) / 100;
+        if (Math.abs(updated) < 0.005) await apiClient.deleteMaintenanceEntry(id, existing.id);
+        else await apiClient.updateMaintenanceEntry(id, existing.id, {
+          date: existing.date, mileage: existing.mileage, type: existing.type, cost: updated,
+          service_provider: existing.service_provider || undefined, notes: existing.notes || undefined,
+        });
+      } else {
+        await apiClient.createMaintenanceEntry(id, {
+          date: anchorEntry.date, mileage: anchorEntry.mileage, type: ADJUSTMENT_LABEL,
+          cost: difference, service_provider: anchorEntry.service_provider || undefined,
+          visit_id: visitTotalEdit.visitId,
+        });
+      }
+      setVisitTotalEdit(null);
+      loadMaintenance().catch(console.error);
+      addToast('success', `Visit total set to $${target.toFixed(2)}`);
+    } catch (err: any) {
+      addToast('error', err.response?.data?.detail || 'Could not change the visit total');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveVisit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const services = [
+      ...Object.entries(visitLines).map(([type, cost]) => ({ type, cost: Number(cost) || 0 })),
+      ...visitExtras.filter((x) => x.type.trim()).map((x) => ({ type: x.type.trim(), cost: Number(x.cost) || 0 })),
+    ];
+    if (!services.length) {
+      setFormError('Tick at least one service');
+      return;
+    }
+    // Appended last so it reads as the closing line of the visit, and only when
+    // it is actually worth a row.
+    const adjustCost = Number(visitAdjust?.cost) || 0;
+    if (visitAdjust && Math.abs(adjustCost) >= 0.005) {
+      services.push({ type: (visitAdjust.label || ADJUSTMENT_LABEL).trim(), cost: adjustCost });
+    }
+    const seen = new Set<string>();
+    for (const service of services) {
+      const key = service.type.toLowerCase();
+      if (seen.has(key)) {
+        setFormError(`"${service.type}" is listed twice`);
+        return;
+      }
+      seen.add(key);
+    }
+    setSaving(true);
+    setFormError('');
+    try {
+      const visit = await apiClient.createMaintenanceVisit(id, {
+        operation_id: crypto.randomUUID(),
+        date: visitHeader.date,
+        mileage: Number(visitHeader.mileage),
+        service_provider: visitHeader.service_provider || undefined,
+        notes: visitHeader.notes || undefined,
+        services,
+      });
+      if (receiptFiles.length) {
+        try {
+          await apiClient.uploadReceipt(id, receiptFiles, visit.visit_id, visit.entries?.[0]?.id);
+        } catch (err: any) {
+          // The services are already saved; losing the receipt should not lose
+          // them, so this reports rather than failing the whole save. Say what
+          // went wrong: discarding the reason turned a 413 from the proxy into
+          // an unexplained failure with nothing in the API log to find.
+          const why = err?.response?.status === 413
+            ? 'the pages were too large to send'
+            : err?.response?.data?.detail || 'the upload did not go through';
+          addToast('error', `Services saved, but the receipt failed — ${why}. Attach it from the record.`);
+        }
+      }
+      setMaintModal(false);
+      loadMaintenance().catch(console.error);
+      loadDocuments().catch(() => {});
+      const logged = services.length - (visitAdjust && Math.abs(adjustCost) >= 0.005 ? 1 : 0);
+      addToast('success', `Logged ${logged} service${logged === 1 ? '' : 's'}`);
+    } catch (err: any) {
+      setFormError(err.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveMaint = async (e: React.FormEvent) => {
@@ -1317,7 +1596,7 @@ export default function VehicleDetailPage() {
           { service_type: 'Oil Change', unit: 'miles', interval: 7500 },
           { service_type: 'Fuel Filter', unit: 'miles', interval: 15000 },
           { service_type: 'Tire Rotation', unit: 'miles', interval: 7500 },
-          { service_type: 'Air Filter', unit: 'miles', interval: 30000 },
+          { service_type: 'Engine Air Filter', unit: 'miles', interval: 30000 },
           { service_type: 'Coolant Flush', unit: 'miles', interval: 60000 },
           { service_type: 'Transmission Service', unit: 'miles', interval: 60000 },
           { service_type: 'Brake Fluid', unit: 'days', interval: 1095 },
@@ -1397,12 +1676,28 @@ export default function VehicleDetailPage() {
     addToast(failed ? 'error' : 'success', parts.join(', '));
   };
 
+  /** A receipt covers a whole visit, so every service in that visit shows it —
+   *  not just whichever entry the upload happened to be anchored to. */
+  const docBelongsToEntry = (doc: VehicleDocument, entry: MaintenanceEntry) =>
+    doc.maintenance_entry_id === entry.id ||
+    (!!entry.visit_id && doc.visit_id === entry.visit_id);
+
+  /** `document.jpg` tells nobody anything in the documents list. Paperwork is
+   *  named for the service it belongs to, its date and the odometer —
+   *  `oil-change-2026-10-28-13710mi.jpg`. ISO date so names sort by date. */
+  const serviceFileBase = (e: MaintenanceEntry) => {
+    const slug = (e.type || 'service').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+    return [slug || 'service', e.date, e.mileage ? `${Math.round(e.mileage)}mi` : '']
+      .filter(Boolean).join('-');
+  };
+
   const openAttachments = async (entry: MaintenanceEntry) => {
     setAttachEntry(entry);
     setAttachDocs([]);
     try {
       const docs = await apiClient.listDocuments(id);
-      setAttachDocs(docs.filter((d) => d.maintenance_entry_id === entry.id));
+      setAttachDocs(docs.filter((d) => docBelongsToEntry(d, entry)));
     } catch { /* list failure just shows empty */ }
   };
 
@@ -1410,9 +1705,10 @@ export default function VehicleDetailPage() {
     if (!attachEntry) return;
     setAttachUploading(true);
     try {
-      await apiClient.uploadDocument(id, file, 'service', attachEntry.id);
+      await apiClient.uploadDocument(id, file, 'service', attachEntry.id,
+        attachEntry.visit_id || undefined, serviceFileBase(attachEntry));
       const docs = await apiClient.listDocuments(id);
-      setAttachDocs(docs.filter((d) => d.maintenance_entry_id === attachEntry.id));
+      setAttachDocs(docs.filter((d) => docBelongsToEntry(d, attachEntry)));
       addToast('success', 'Attachment added');
     } catch {
       addToast('error', 'Failed to upload attachment');
@@ -1467,6 +1763,64 @@ export default function VehicleDetailPage() {
       { timeout: 10000 }
     );
   };
+
+  // Services from one shop visit are shown as a block: the date, odometer and
+  // provider print once and the rest are marked as continuing it. The receipt
+  // is resolved per visit, so every service in the visit shows the paperwork.
+  const maintVisitRows = useMemo(() => {
+    const needle = maintSearch.toLowerCase();
+    const rows = maintEntries
+      .filter((e) => !maintSearch || [e.type, e.service_provider, e.notes, e.date]
+        .some((f) => f?.toLowerCase().includes(needle)))
+      .slice()
+      .sort((a, b) => (
+        b.date.localeCompare(a.date) ||
+        (a.visit_id || '').localeCompare(b.visit_id || '') ||
+        a.id - b.id
+      ));
+    // Visit sums come from every entry of the visit, not just the rows that
+    // survived the search filter, so a filtered view never shows a short total.
+    const visitSums = new Map<string, { total: number; count: number }>();
+    for (const entry of maintEntries) {
+      if (!entry.visit_id) continue;
+      const seen = visitSums.get(entry.visit_id) || { total: 0, count: 0 };
+      seen.total += Number(entry.cost) || 0;
+      seen.count += 1;
+      visitSums.set(entry.visit_id, seen);
+    }
+    return rows.map((entry, i) => {
+      const visit = entry.visit_id ? visitSums.get(entry.visit_id) : undefined;
+      return {
+        entry,
+        continuesVisit: !!entry.visit_id && i > 0 && rows[i - 1].visit_id === entry.visit_id,
+        hasReceipt: documents.some((d) => docBelongsToEntry(d, entry)),
+        visitTotal: visit && visit.count > 1 ? visit.total : null,
+      };
+    });
+  }, [maintEntries, maintSearch, documents]);
+
+  /** One card per visit. `maintVisitRows` is already sorted so a visit's
+   *  services are contiguous, which is what `continuesVisit` relies on too. */
+  const maintVisitGroups = useMemo(() => {
+    type Row = typeof maintVisitRows[number];
+    const groups: { key: string; visitId: string | null; rows: Row[] }[] = [];
+    for (const row of maintVisitRows) {
+      const key = row.entry.visit_id || `entry-${row.entry.id}`;
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.rows.push(row);
+      else groups.push({ key, visitId: row.entry.visit_id || null, rows: [row] });
+    }
+    return groups.map((g) => ({
+      ...g,
+      // visitTotal covers the whole visit even when a search hid some of it;
+      // without one, the rows on show are the whole record.
+      total: g.rows[0].visitTotal ?? g.rows.reduce((sum, r) => sum + (Number(r.entry.cost) || 0), 0),
+      date: g.rows[0].entry.date,
+      mileage: g.rows[0].entry.mileage,
+      provider: g.rows[0].entry.service_provider || '',
+      hasReceipt: g.rows.some((r) => r.hasReceipt),
+    }));
+  }, [maintVisitRows]);
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -1525,7 +1879,7 @@ export default function VehicleDetailPage() {
       ? [{ id: 'trips' as Tab, label: 'Trip Log' }]
       : [{ id: 'fuel' as Tab, label: 'Fuel' }]
     ),
-    { id: 'maintenance', label: 'Maintenance' },
+    { id: 'maintenance', label: 'Service' },
     { id: 'expenses', label: 'Expenses' },
     { id: 'parts', label: 'Parts' },
     { id: 'tires', label: 'Tires' },
@@ -2170,7 +2524,20 @@ export default function VehicleDetailPage() {
       {/* ── MAINTENANCE ──────────────────────────────────────────────────────── */}
       {activeTab === 'maintenance' && (
         <div className="space-y-6">
+          {/* One tab, two views. Records first: that is what gets looked at. */}
+          <div className="flex gap-1 bg-slate-800/60 border border-slate-700 rounded-lg p-1 sm:inline-flex">
+            {([['records', 'Service Records'], ['reminders', 'Reminders']] as const).map(([view, label]) => (
+              <button key={view} onClick={() => setMaintView(view)}
+                className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  maintView === view ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+                }`}>
+                {label}{view === 'reminders' && reminders.length ? ` (${reminders.length})` : ''}
+              </button>
+            ))}
+          </div>
+
           {/* Reminders */}
+          {maintView === 'reminders' && (
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-white">Reminders</h2>
@@ -2270,8 +2637,10 @@ export default function VehicleDetailPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Service history */}
+          {maintView === 'records' && (
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-white">Service History</h2>
@@ -2309,60 +2678,119 @@ export default function VehicleDetailPage() {
                   value={maintSearch}
                   onChange={(e) => setMaintSearch(e.target.value)}
                 />
-              <div className="overflow-x-auto rounded-lg border border-slate-700">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-800/80">
-                    <tr className="text-slate-400 text-left">
-                      <th className="px-4 py-3 font-medium">Date</th>
-                      <th className="px-4 py-3 font-medium">Service</th>
-                      <th className="px-4 py-3 font-medium">Mileage</th>
-                      <th className="px-4 py-3 font-medium">Cost</th>
-                      <th className="px-4 py-3 font-medium">Provider</th>
-                      <th className="px-4 py-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {maintEntries.filter((e) => !maintSearch || [e.type, e.service_provider, e.notes, e.date].some((f) => f?.toLowerCase().includes(maintSearch.toLowerCase()))).map((e) => (
-                      <tr key={e.id} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
-                        <td className="px-4 py-3 text-slate-300">{fmtDate(e.date)}</td>
-                        <td className="px-4 py-3 text-white">{e.type}</td>
-                        <td className="px-4 py-3 text-slate-300">{e.mileage.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-slate-300">${Number(e.cost).toFixed(2)}</td>
-                        <td className="px-4 py-3 text-slate-400">{e.service_provider || '—'}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => openAttachments(e)}
-                              title="Attachments"
-                              className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-                            >
-                              📎
+              {/* A visit is one collapsed card. The table this replaced needed
+                  sideways scrolling on a phone to reach cost and provider. */}
+              <div className="rounded-lg border border-slate-700 divide-y divide-slate-700 overflow-hidden">
+                {maintVisitGroups.map((g) => {
+                  const single = g.rows.length === 1;
+                  // A search is a request to see the matches, not to go hunting
+                  // for them behind a chevron.
+                  const open = expandedVisits.has(g.key) || !!maintSearch;
+                  return (
+                    <div key={g.key}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedVisits((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(g.key)) next.delete(g.key); else next.add(g.key);
+                          return next;
+                        })}
+                        className="w-full text-left px-3 py-2.5 flex items-start gap-2 hover:bg-slate-800/50 transition-colors"
+                      >
+                        <span className={`text-slate-500 text-xs mt-1 flex-shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="flex items-baseline justify-between gap-2">
+                            <span className="text-white text-sm font-medium truncate">
+                              {single ? g.rows[0].entry.type : fmtDate(g.date)}
+                            </span>
+                            <span className="text-white text-sm font-semibold flex-shrink-0">${g.total.toFixed(2)}</span>
+                          </span>
+                          <span className="block text-xs text-slate-400 truncate">
+                            {[
+                              single ? fmtDate(g.date) : `${g.rows.length} services`,
+                              g.mileage ? `${g.mileage.toLocaleString()} mi` : '',
+                              g.provider,
+                            ].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        {g.hasReceipt && <ClipIcon className="text-teal-400 flex-shrink-0 mt-0.5" />}
+                      </button>
+                      {open && (
+                        <div className="bg-slate-900/60 px-3 pb-2">
+                          {g.rows.map(({ entry: e, hasReceipt }) => (
+                            <div key={e.id} className="flex items-center gap-1.5 py-1.5 border-t border-slate-800">
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-sm text-slate-200 truncate">{e.type}</span>
+                                {e.notes && <span className="block text-xs text-slate-500 truncate">{e.notes}</span>}
+                              </span>
+                              <span className="text-sm text-slate-300 flex-shrink-0">${Number(e.cost).toFixed(2)}</span>
+                              <button onClick={() => openAttachments(e)}
+                                title={hasReceipt ? 'View paperwork' : 'Attachments'}
+                                className={`px-1.5 py-1 rounded hover:bg-slate-700 transition-colors ${hasReceipt ? 'text-teal-400' : 'text-slate-500'}`}>
+                                <ClipIcon />
+                              </button>
+                              <button onClick={() => openMaintEdit(e)} title="Edit"
+                                className="text-xs text-slate-400 hover:text-white px-1.5 py-1 rounded hover:bg-slate-700 transition-colors">✎</button>
+                              <button onClick={() => deleteMaint(e.id)} title="Delete"
+                                className="text-red-400 hover:text-red-300 px-1.5 py-1 rounded hover:bg-slate-700 transition-colors leading-none">×</button>
+                            </div>
+                          ))}
+                          {/* Tax, fees and discounts belong to the visit, not to a
+                              service, so the total is corrected here. */}
+                          {!single && g.visitId && (
+                            <button type="button"
+                              onClick={() => setVisitTotalEdit({ visitId: g.visitId!, current: g.total, value: g.total.toFixed(2) })}
+                              className="mt-1 text-xs text-slate-500 hover:text-teal-400 transition-colors">
+                              Adjust visit total
                             </button>
-                            <button
-                              onClick={() => openMaintEdit(e)}
-                              className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => deleteMaint(e.id)}
-                              className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-                            >
-                              Del
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               </>
             )}
           </div>
+          )}
+
+          {/* Correcting the total of a visit already logged. The difference
+              goes to the visit's adjustment line so no service cost moves. */}
+          {visitTotalEdit && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50"
+              onClick={() => setVisitTotalEdit(null)}>
+              <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-sm space-y-4"
+                onClick={(ev) => ev.stopPropagation()}>
+                <h3 className="text-lg font-semibold text-white">Visit total</h3>
+                <p className="text-xs text-slate-400">
+                  The services add up to ${visitTotalEdit.current.toFixed(2)}. Set what you actually
+                  paid and the difference is kept as a separate “{ADJUSTMENT_LABEL}” line — no
+                  service cost is changed.
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">$</span>
+                  <input type="number" step="0.01" inputMode="decimal" autoFocus
+                    className="input-field flex-1 text-right text-lg font-semibold"
+                    value={visitTotalEdit.value}
+                    onChange={(ev) => setVisitTotalEdit((prev) => (prev ? { ...prev, value: ev.target.value } : prev))}
+                    onFocus={(ev) => ev.target.select()} />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button type="button" className="btn-secondary px-4 py-2"
+                    onClick={() => setVisitTotalEdit(null)}>Cancel</button>
+                  <button type="button" className="btn-primary px-4 py-2"
+                    disabled={saving} onClick={saveVisitTotal}>
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Maintenance entry modal */}
           <Modal isOpen={maintModal} onClose={() => setMaintModal(false)} title={editMaint ? 'Edit Service Record' : 'Log Service'}>
+            {editMaint ? (
             <form onSubmit={saveMaint} className="space-y-4">
               <FormError msg={formError} />
               <div className="grid grid-cols-2 gap-3">
@@ -2418,7 +2846,7 @@ export default function VehicleDetailPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Cost ($) *</label>
-                  <input type="number" className="input-field" min="0" step="0.01" value={maintForm.cost}
+                  <input type="number" className="input-field" step="0.01" value={maintForm.cost}
                     onChange={(e) => setMaintForm((p) => ({ ...p, cost: Number(e.target.value) }))} onFocus={(e) => e.target.select()} required />
                 </div>
                 <div>
@@ -2444,6 +2872,216 @@ export default function VehicleDetailPage() {
                 </button>
               </div>
             </form>
+            ) : (
+            <form onSubmit={saveVisit} className="space-y-4">
+              <FormError msg={formError} />
+
+              {/* Receipt first: scanning it fills most of the form below. */}
+              <div className="p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm text-slate-300">
+                    Receipt
+                    {receiptFiles.length > 0 && (
+                      <span className="text-slate-500"> — {receiptFiles.length} page{receiptFiles.length === 1 ? '' : 's'}</span>
+                    )}
+                  </label>
+                  {receiptFiles.length > 0 && (
+                    <button type="button" onClick={() => { setReceiptFiles([]); setOcrSummary(null); }}
+                      className="text-xs text-slate-500 hover:text-red-400 transition-colors">Clear</button>
+                  )}
+                </div>
+                <input type="file" accept="image/*" multiple
+                  onChange={(e) => pickReceiptPages(Array.from(e.target.files || []))}
+                  className="block w-full text-sm text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-slate-700 file:text-slate-200" />
+                <p className="text-xs text-slate-500">
+                  Multi-page? Pick every page at once — they are stored together as one PDF.
+                </p>
+                {receiptFiles.length > 0 && (
+                  <button type="button" onClick={scanReceipt} disabled={ocrBusy}
+                    className="btn-secondary w-full text-sm py-1.5">
+                    {ocrBusy
+                      ? `Reading ${receiptFiles.length} page${receiptFiles.length === 1 ? '' : 's'}…`
+                      : 'Read receipt'}
+                  </button>
+                )}
+                {ocrSummary && (
+                  <div className="text-xs space-y-1 pt-1">
+                    <p className="text-slate-400">
+                      Operations read: <span className="text-slate-200">${ocrSummary.linesTotal.toFixed(2)}</span>
+                      {ocrSummary.total != null && (
+                        <> · printed total <span className="text-slate-200">${ocrSummary.total.toFixed(2)}</span></>
+                      )}
+                    </p>
+                    {ocrSummary.warnings.map((warning, i) => (
+                      <p key={i} className="text-amber-400">{warning}</p>
+                    ))}
+                    <p className="text-slate-500">Everything below is a suggestion — check it against the paper.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Date *</label>
+                  <input type="date" className="input-field" value={visitHeader.date}
+                    onChange={(e) => setVisitHeader((p) => ({ ...p, date: e.target.value }))} required />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Mileage *</label>
+                  <input type="number" className="input-field" min="0" value={visitHeader.mileage}
+                    onChange={(e) => setVisitHeader((p) => ({ ...p, mileage: Number(e.target.value) }))}
+                    onFocus={(e) => e.target.select()} required />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-slate-300">Services performed *</label>
+                  <button type="button" onClick={() => setCustomTypesOpen((o) => !o)}
+                    className="text-xs text-slate-400 hover:text-teal-400 transition-colors">
+                    {customTypesOpen ? 'Done' : '✎ Edit list'}
+                  </button>
+                </div>
+                <div className="space-y-0.5 max-h-60 overflow-y-auto pr-1">
+                  {SERVICE_TYPES.map((t) => {
+                    const checked = t in visitLines;
+                    return (
+                      <div key={t} className={`flex items-center gap-2 px-2 py-1 rounded ${checked ? 'bg-slate-800' : ''}`}>
+                        <input type="checkbox" id={`svc-${t}`} checked={checked}
+                          onChange={() => toggleVisitService(t)} className="accent-teal-500" />
+                        <label htmlFor={`svc-${t}`} className="flex-1 text-sm text-slate-300 cursor-pointer">{t}</label>
+                        {checked && (
+                          <>
+                            <span className="text-slate-500 text-sm">$</span>
+                            <input type="number" min="0" step="0.01" placeholder="0.00"
+                              className="input-field w-24 py-1 text-sm text-right" value={visitLines[t]}
+                              onChange={(e) => setVisitLines((p) => ({ ...p, [t]: e.target.value }))}
+                              onFocus={(e) => e.target.select()} />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {customTypesOpen && (
+                  <div className="mt-2 p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                    {customServiceTypes.length === 0 && (
+                      <p className="text-slate-500 text-xs">No custom types yet.</p>
+                    )}
+                    {customServiceTypes.map((t) => (
+                      <div key={t} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-300">{t}</span>
+                        <button type="button" onClick={() => removeCustomType(t)}
+                          className="text-slate-500 hover:text-red-400 text-base leading-none transition-colors">×</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <input className="input-field flex-1 text-sm py-1" placeholder="Add type..."
+                        value={newTypeInput} onChange={(e) => setNewTypeInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomType(newTypeInput); } }} />
+                      <button type="button" onClick={() => addCustomType(newTypeInput)}
+                        className="btn-secondary text-sm px-3 py-1">Add</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Operations the receipt listed that have no matching type. They
+                  are never folded into an existing one — a cabin filter logged
+                  as an engine filter would roll the wrong reminder forward. */}
+              <div className="p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-slate-400">
+                    {visitExtras.length > 0
+                      ? 'On the receipt but not in your list — rename to keep, or remove.'
+                      : 'Anything else performed?'}
+                  </p>
+                  <button type="button" onClick={() => setVisitExtras((p) => [...p, { type: '', cost: '' }])}
+                    className="text-xs text-slate-400 hover:text-teal-400 transition-colors">+ Add</button>
+                </div>
+                {visitExtras.map((extra, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input className="input-field flex-1 py-1 text-sm" placeholder="Service name" value={extra.type}
+                      onChange={(e) => setVisitExtras((p) => p.map((v, j) => (j === i ? { ...v, type: e.target.value } : v)))} />
+                    <span className="text-slate-500 text-sm">$</span>
+                    <input type="number" step="0.01" placeholder="0.00"
+                      className="input-field w-24 py-1 text-sm text-right" value={extra.cost}
+                      onChange={(e) => setVisitExtras((p) => p.map((v, j) => (j === i ? { ...v, cost: e.target.value } : v)))}
+                      onFocus={(e) => e.target.select()} />
+                    <button type="button" onClick={() => setVisitExtras((p) => p.filter((_, j) => j !== i))}
+                      className="text-slate-500 hover:text-red-400 text-base leading-none transition-colors">×</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Tax, fees and discounts apply to the whole invoice, so the
+                  services never add up to what was paid. Typing the total puts
+                  the difference on its own line instead of altering a service. */}
+              {visitAdjust && (
+                <div className="flex items-center gap-2 px-1">
+                  <input className="input-field flex-1 py-1 text-sm" placeholder="Adjustment"
+                    value={visitAdjust.label}
+                    onChange={(e) => setVisitAdjust((p) => (p ? { ...p, label: e.target.value } : p))} />
+                  <span className="text-slate-500 text-sm">$</span>
+                  <input type="number" step="0.01" placeholder="0.00"
+                    className="input-field w-24 py-1 text-sm text-right" value={visitAdjust.cost}
+                    onChange={(e) => setVisitAdjust((p) => (p ? { ...p, cost: e.target.value } : p))}
+                    onFocus={(e) => e.target.select()} />
+                  <button type="button" onClick={() => setVisitAdjust(null)}
+                    className="text-slate-500 hover:text-red-400 text-base leading-none transition-colors">&times;</button>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between px-1 gap-2">
+                <span className="text-sm text-slate-400">Visit total</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-400">$</span>
+                  <input type="number" step="0.01" inputMode="decimal"
+                    className="input-field w-28 py-1 text-lg font-semibold text-right"
+                    value={visitTotalDraft ?? visitTotal().toFixed(2)}
+                    onChange={(e) => { setVisitTotalDraft(e.target.value); setVisitTotalTo(e.target.value); }}
+                    onBlur={() => setVisitTotalDraft(null)}
+                    onFocus={(e) => e.target.select()} />
+                </div>
+              </div>
+              {ocrSummary?.total != null && Math.abs(ocrSummary.total - visitTotal()) > 0.005 && (
+                <p className="text-xs text-amber-400 px-1">
+                  The receipt prints ${ocrSummary.total.toFixed(2)} — a ${Math.abs(ocrSummary.total - visitTotal()).toFixed(2)} difference.{' '}
+                  {ocrSummary.total > visitTotal()
+                    // Fees sit outside the operations, but so does a misread sub total:
+                    // an operation printing labour and parts above its own Sub Total has
+                    // had a part's price taken instead. Worth a look either way.
+                    ? 'Check each cost against the receipt — sales tax or a shop fee can explain it, but so can a misread line.'
+                    : 'A discount or credit usually accounts for the rest.'}{' '}
+                  <button type="button"
+                    onClick={() => { setVisitTotalDraft(null); setVisitTotalTo(String(ocrSummary.total)); }}
+                    className="underline hover:text-amber-300 transition-colors">
+                    Use ${ocrSummary.total.toFixed(2)}
+                  </button>
+                </p>
+              )}
+
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Provider</label>
+                <input className="input-field" placeholder="e.g. Jiffy Lube" value={visitHeader.service_provider}
+                  onChange={(e) => setVisitHeader((p) => ({ ...p, service_provider: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Notes</label>
+                <textarea className="input-field" rows={2} value={visitHeader.notes}
+                  onChange={(e) => setVisitHeader((p) => ({ ...p, notes: e.target.value }))} />
+              </div>
+
+              <div className="flex gap-3">
+                <button type="submit" disabled={saving || ocrBusy} className="btn-primary flex-1">
+                  {saving ? 'Saving...' : 'Save visit'}
+                </button>
+                <button type="button" onClick={() => setMaintModal(false)} className="btn-secondary flex-1">
+                  Cancel
+                </button>
+              </div>
+            </form>
+            )}
           </Modal>
 
           {/* Reminder modal */}
@@ -3476,6 +4114,11 @@ export default function VehicleDetailPage() {
         onClose={() => {
           if (docViewer) URL.revokeObjectURL(docViewer.url);
           setDocViewer(null);
+          // Back to the attachment list, so several photos take one tap each.
+          if (attachReturn) {
+            openAttachments(attachReturn).catch(() => {});
+            setAttachReturn(null);
+          }
         }}
         title={docViewer?.filename ?? 'Document'}
       >
@@ -3643,6 +4286,8 @@ export default function VehicleDetailPage() {
                         onClick={async () => {
                           try {
                             const blob = await apiClient.downloadDocument(id, d.id);
+                            setAttachReturn(attachEntry);
+                            setAttachEntry(null);
                             setDocViewer({ url: URL.createObjectURL(blob), blob, mime: blob.type, filename: d.filename });
                           } catch {
                             addToast('error', 'Failed to load attachment');

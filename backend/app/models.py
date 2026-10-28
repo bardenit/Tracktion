@@ -169,6 +169,10 @@ class MaintenanceEntry(Base):
     cost = Column(Float)
     service_provider = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
+    # One shop visit produces one entry per service performed, all sharing a
+    # visit_id. Keeping them as separate rows is what lets reminder matching,
+    # per-service history and interval maths stay keyed on `type`.
+    visit_id = Column(String(36), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
 
     vehicle = relationship("Vehicle", back_populates="maintenance_entries")
@@ -218,6 +222,10 @@ class Document(Base):
     byte_length = Column(Integer, nullable=True)
     sha256 = Column(String(64), nullable=True)
     ocr_text = Column(Text, nullable=True)  # Extracted text (Phase 2)
+    # A receipt covers a whole visit. maintenance_entry_id still anchors it to
+    # one entry for backwards compatibility, but visit_id is what the UI reads,
+    # so deleting a single service does not hide the paperwork for the rest.
+    visit_id = Column(String(36), nullable=True, index=True)
     document_type = Column(String(50))  # receipt, service, insurance, registration, warranty, other
     uploaded_at = Column(DateTime, server_default=func.now())
 

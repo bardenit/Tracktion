@@ -9,7 +9,7 @@ from app.data_config import get_database_url
 from app.schema_bootstrap import reconcile_legacy_schema
 
 
-HEAD_REVISION = "0009_restore_configured_storage"
+HEAD_REVISION = "0010_maintenance_visits"
 
 
 def alembic_config(database_url: str) -> Config:

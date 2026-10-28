@@ -63,6 +63,7 @@ def build_vehicle_report(
     maint_entries: List[MaintenanceEntry],
     expenses: List[Expense],
     tire_events: Optional[List[TireEvent]] = None,
+    receipt_visit_ids: Optional[set] = None,
 ) -> bytes:
     """Render a full vehicle history report as PDF bytes."""
     buf = BytesIO()
@@ -145,17 +146,34 @@ def build_vehicle_report(
     # ── Maintenance history ──────────────────────────────────────────────────
     story.append(Paragraph("Maintenance History", h2))
     if maint_entries:
-        rows = [["Date", "Mileage", "Service", "Provider", "Cost", "Notes"]]
-        for e in sorted(maint_entries, key=lambda x: x.date, reverse=True):
+        receipts = receipt_visit_ids or set()
+        # Several services done in one shop visit share a visit_id. They stay
+        # separate rows, but the date, odometer and shop print once per visit so
+        # the history reads as a service record rather than as repeated lines.
+        ordered = sorted(
+            maint_entries,
+            key=lambda x: (x.date, x.visit_id or "", x.id),
+            reverse=True,
+        )
+        rows = [["Date", "Mileage", "Service", "Provider", "Cost", "Receipt", "Notes"]]
+        previous_visit = object()
+        for e in ordered:
+            visit = e.visit_id
+            same_visit = visit is not None and visit == previous_visit
             rows.append([
-                _fmt_date(e.date),
-                f"{e.mileage:,.0f}" if e.mileage else "—",
+                "" if same_visit else _fmt_date(e.date),
+                "" if same_visit else (f"{e.mileage:,.0f}" if e.mileage else "—"),
                 Paragraph(e.type or "", cell),
-                Paragraph(e.service_provider or "", cell),
+                "" if same_visit else Paragraph(e.service_provider or "", cell),
                 _fmt_money(e.cost or 0),
-                Paragraph(e.notes or "", cell),
+                "" if same_visit else ("Yes" if visit in receipts else ""),
+                Paragraph(e.notes or "", cell) if not same_visit else "",
             ])
-        story.append(_section_table(rows, [0.85 * inch, 0.7 * inch, 1.5 * inch, 1.2 * inch, 0.7 * inch, 2.2 * inch]))
+            previous_visit = visit
+        story.append(_section_table(rows, [
+            0.8 * inch, 0.65 * inch, 1.45 * inch, 1.1 * inch,
+            0.65 * inch, 0.5 * inch, 1.95 * inch,
+        ]))
     else:
         story.append(Paragraph("No maintenance records.", sub_style))
 
