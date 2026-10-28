@@ -80,9 +80,18 @@ Frontend (inside a container, or a local-disk copy):
 
 ```bash
 npm run type-check     # tsc --noEmit
+npm run lint           # eslint .
 npm run test           # vitest run
 npm run build          # vite build
 ```
+
+**`type-check`, `test` and `build` all pass code that breaks the Rules of
+Hooks** — a `useMemo` below an early return shipped and crashed the app with
+React error #310. `npm run lint` is the only check that catches it, so run it
+on any change to a component. It reports 0 errors and 10 warnings today;
+`react-hooks/rules-of-hooks` is an error, and the React Compiler rules
+(`purity`, `set-state-in-effect`, `immutability`) warn on patterns that already
+exist. See the reasoning in `frontend/eslint.config.mjs`.
 
 ## Structure
 
