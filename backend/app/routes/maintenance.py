@@ -23,20 +23,28 @@ from app.deps import check_vehicle_access
 from app.services.maintenance_reminders import recompute_reminders
 from app.services.vehicle_mileage import observe_vehicle_mileage
 from app.services.bulk_imports import begin_bulk_import, finish_bulk_import
+from app.services.station_names import canonical_name, known_shop_names
 
 router = APIRouter()
 
 
 @router.post("/{vehicle_id}/entries/bulk", response_model=BulkImportResponse)
 def import_maintenance_entries(vehicle_id: int, batch: MaintenanceBulkImport, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     operation_id, payload_hash, previous = begin_bulk_import(db, current_user.id, vehicle_id, "maintenance", batch)
     if previous:
         return BulkImportResponse(operation_id=operation_id, imported_count=previous.imported_count)
     types = set()
+    # Grows as the batch is imported, so spellings inside one import collapse
+    # onto each other and not only onto what was already on file.
+    known = known_shop_names(db, vehicle.user_id)
     try:
         for item in batch.entries:
-            db.add(MaintenanceEntry(vehicle_id=vehicle_id, **item.model_dump()))
+            fields = item.model_dump()
+            fields["service_provider"] = canonical_name(fields.get("service_provider"), known)
+            if fields["service_provider"] and fields["service_provider"] not in known:
+                known.append(fields["service_provider"])
+            db.add(MaintenanceEntry(vehicle_id=vehicle_id, **fields))
             types.add(item.type)
         db.flush()
         observe_vehicle_mileage(db, vehicle_id, max(item.mileage for item in batch.entries))
@@ -56,7 +64,7 @@ def create_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
     visit_id = None
     if entry_data.visit_id:
@@ -81,7 +89,7 @@ def create_maintenance_entry(
         mileage=entry_data.mileage,
         type=entry_data.type,
         cost=entry_data.cost,
-        service_provider=entry_data.service_provider,
+        service_provider=canonical_name(entry_data.service_provider, known_shop_names(db, vehicle.user_id)),
         notes=entry_data.notes,
         visit_id=visit_id,
     )
@@ -110,7 +118,7 @@ def create_maintenance_visit(
     connection cannot double-log a service — the same guarantee the fuel route
     gets from its idempotency table, without needing one.
     """
-    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
 
     try:
         visit_id = str(UUID(visit.operation_id))
@@ -132,6 +140,10 @@ def create_maintenance_visit(
             total_cost=sum(entry.cost or 0 for entry in existing),
         )
 
+    # One shop for the whole visit, so the fleet's spelling is resolved once
+    # rather than per service.
+    provider = canonical_name(visit.service_provider, known_shop_names(db, vehicle.user_id))
+
     entries = []
     for service in visit.services:
         entry = MaintenanceEntry(
@@ -140,7 +152,7 @@ def create_maintenance_visit(
             mileage=visit.mileage,
             type=service.type.strip(),
             cost=service.cost,
-            service_provider=visit.service_provider,
+            service_provider=provider,
             notes=visit.notes,
             visit_id=visit_id,
         )
@@ -204,7 +216,7 @@ def update_maintenance_entry(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     entry = db.query(MaintenanceEntry).filter(
         MaintenanceEntry.id == entry_id, MaintenanceEntry.vehicle_id == vehicle_id
     ).first()
@@ -216,7 +228,7 @@ def update_maintenance_entry(
     entry.mileage = entry_data.mileage
     entry.type = entry_data.type
     entry.cost = entry_data.cost
-    entry.service_provider = entry_data.service_provider
+    entry.service_provider = canonical_name(entry_data.service_provider, known_shop_names(db, vehicle.user_id))
     entry.notes = entry_data.notes
     db.flush()
     observe_vehicle_mileage(db, vehicle_id, entry_data.mileage)
@@ -322,7 +334,7 @@ def complete_maintenance_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
+    vehicle = check_vehicle_access(vehicle_id, current_user.id, db, require_write=True)
     try:
         operation_id = str(UUID(completion.operation_id))
     except ValueError as exc:
@@ -353,7 +365,7 @@ def complete_maintenance_reminder(
         mileage=completion.mileage,
         type=reminder.service_type,
         cost=completion.cost,
-        service_provider=completion.service_provider,
+        service_provider=canonical_name(completion.service_provider, known_shop_names(db, vehicle.user_id)),
         notes=completion.notes,
     )
     db.add(entry)

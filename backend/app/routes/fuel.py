@@ -10,7 +10,7 @@ from app.models import User, FuelEntry, FuelIdempotencyOperation
 from app.schemas import FuelEntryCreate, FuelEntryResponse, FuelEntryUpdate, FuelBulkImport, BulkImportResponse
 from app.services.bulk_imports import begin_bulk_import, finish_bulk_import
 from app.services.fuel_calculations import recalculate_fuel_economy, validate_fuel_entry_order
-from app.services.station_names import canonical_station, known_station_names
+from app.services.station_names import canonical_name, known_station_names
 from app.services.vehicle_mileage import observe_vehicle_mileage
 from app.auth import get_current_user
 from app.deps import check_vehicle_access
@@ -34,7 +34,7 @@ def import_fuel_entries(vehicle_id: int, batch: FuelBulkImport, current_user: Us
         for item in ordered:
             validate_fuel_entry_order(combined, item.date, item.mileage)
             fields = item.model_dump(exclude={"operation_id"})
-            fields["location"] = canonical_station(fields.get("location"), known)
+            fields["location"] = canonical_name(fields.get("location"), known)
             if fields["location"] and fields["location"] not in known:
                 known.append(fields["location"])
             entry = FuelEntry(vehicle_id=vehicle_id, **fields)
@@ -101,7 +101,7 @@ def create_fuel_entry(
         mileage=entry_data.mileage,
         gallons=entry_data.gallons,
         cost=entry_data.cost,
-        location=canonical_station(entry_data.location, known_station_names(db, vehicle.user_id)),
+        location=canonical_name(entry_data.location, known_station_names(db, vehicle.user_id)),
         notes=entry_data.notes,
         octane=entry_data.octane,
         missed_fillup=entry_data.missed_fillup,
@@ -187,7 +187,7 @@ def update_fuel_entry(
     entry.mileage = entry_data.mileage
     entry.gallons = entry_data.gallons
     entry.cost = entry_data.cost
-    entry.location = canonical_station(entry_data.location, known_station_names(db, vehicle.user_id))
+    entry.location = canonical_name(entry_data.location, known_station_names(db, vehicle.user_id))
     entry.notes = entry_data.notes
     entry.octane = entry_data.octane
     entry.missed_fillup = entry_data.missed_fillup

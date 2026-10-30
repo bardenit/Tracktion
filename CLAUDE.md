@@ -120,11 +120,20 @@ See `frontend/eslint.config.mjs`.
 - Expense categories are user-extensible. Do not constrain them to a fixed enum in
   `ExpenseCreate`; the enum applies only to what the OCR model may return.
 - OCR output is always an editable pre-fill the user confirms, never a silent write.
-- Fuel station names are normalized on write, in `app/services/station_names.py`. One
-  Costco had arrived under four spellings because the receipt header, the pump and the
-  driver each name it differently. A name is only ever replaced by one the fleet already
-  uses — nothing there carries a list of chains — so an unfamiliar station is stored as
-  given and becomes the spelling later variants collapse onto.
+- Fuel station names and service-shop names are normalized on write, in
+  `app/services/station_names.py` — `known_station_names` for `fuel_entries.location`,
+  `known_shop_names` for `maintenance_entries.service_provider`. One Costco had arrived
+  under four spellings, and one dealer was `TodDWenzel` by hand against the `Todd Wenzel
+  GMC` its invoice OCR reads, because the receipt header, the pump and the driver each
+  name a place differently. A name is only ever replaced by one the fleet already uses —
+  nothing there carries a list of chains — so an unfamiliar place is stored as given and
+  becomes the spelling later variants collapse onto. Two names match on their letters and
+  digits alone, so `Loves` reaches `Love's`; collapsing a *longer* reading onto a shorter
+  one additionally needs a word boundary, so `Costcutter` is not a Costco.
+- The normalizer cannot lengthen or re-punctuate a name: with `Costco` on file, saving
+  `Costco Fenton` stores `Costco`. Renaming a place is an edit to the rows already there,
+  which is what the rename tables in `0012_normalize_shop_names` are — and the reason
+  they are matched on letters and digits is so a fix lands however the name was typed.
 
 ## Permission model
 

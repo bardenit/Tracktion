@@ -9,7 +9,7 @@ from app.data_config import get_database_url
 from app.schema_bootstrap import reconcile_legacy_schema
 
 
-HEAD_REVISION = "0011_normalize_station_names"
+HEAD_REVISION = "0012_normalize_shop_names"
 
 
 def alembic_config(database_url: str) -> Config:
